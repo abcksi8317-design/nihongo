@@ -7327,7 +7327,14 @@ document.addEventListener("visibilitychange",function(){
 
 /* ============================ 기기 연동 (Firebase) + 백업 코드 ============================ */
 /* FB_CONFIG 에 Firebase 웹앱 설정을 넣으면 폰·PC·태블릿이 같은 기록을 씁니다. null 이면 연동은 꺼지고 백업 코드만 쓸 수 있습니다. */
-var FB_CONFIG=null;
+var FB_CONFIG={
+  apiKey:"AIzaSyAG97HwDQGNMKjU2ni_b4F57PbaRpbqhDE",
+  authDomain:"qqqq-1f629.firebaseapp.com",
+  projectId:"qqqq-1f629",
+  storageBucket:"qqqq-1f629.firebasestorage.app",
+  messagingSenderId:"833080508941",
+  appId:"1:833080508941:web:d6628feab1dc53e9874b44"
+};
 var SYNC={user:null,msg:"",last:LS.get("jp.sync.last",0),busy:false,db:null,auth:null,timer:null};
 function syncParse(s){try{return JSON.parse(s);}catch(e){return undefined;}}
 function syncTmap(){try{return JSON.parse(localStorage.getItem("jp._t")||"{}")||{};}catch(e){return {};}}
