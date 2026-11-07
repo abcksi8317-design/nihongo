@@ -3850,12 +3850,14 @@ function chPool(th){
 function chThemeAuto(){        /* 기본은 맞춤 구성(동사3·い2·な2·명사3) */
   return "set";
 }
+/* 오늘 단어는 날짜로 정해집니다 — 같은 기록이면 어느 기기에서 열어도 같은 10개 (새로 뽑기를 누르면 그때만 달라집니다) */
+function chShuf(a){return rdShuf(a,rdRng(rdHash(todayStr()+"|"+(S.chSalt||""))));}
 function chBuildSet(){
   var all=allWords().filter(function(w){return wPos(w)!=="adv";}),i,k,out=[],used={};
   function freshOf(t){
     var a=all.filter(function(w){return (!t||wPos(w)===t)&&!used[wkey(w)];});
     var f=a.filter(function(w){return !S.hist[wkey(w)];});
-    return shuffle(f.length>=1?f:a);
+    return chShuf(f.length>=1?f:a);
   }
   CH_RECIPE.forEach(function(rc){
     var c=freshOf(rc[0]).slice(0,rc[1]);
@@ -3870,16 +3872,17 @@ function chTheme(){
   return chThemeAuto();
 }
 function ensureChallenge(force){
-  if(!force&&S.ch&&S.ch.date===todayStr()&&S.ch.ids&&S.ch.ids.length&&S.ch.theme&&S.ch.rv===3)return;
-  var th=force||((S.ch&&S.ch.rv===3)?chTheme():"set");
+  if(!force&&S.ch&&S.ch.date===todayStr()&&S.ch.ids&&S.ch.ids.length&&S.ch.theme&&S.ch.rv===4)return;
+  var th=force||((S.ch&&S.ch.rv===4)?chTheme():"set");
   var pool=chPool(th),fresh=[],i,k;
   if(th==="set"){fresh=chBuildSet();}
   else{
     for(i=0;i<pool.length;i++){k=wkey(pool[i]);if(!S.hist[k])fresh.push(pool[i]);}
     if(fresh.length<10)fresh=pool.slice();
-    fresh=shuffle(fresh).slice(0,10);
+    fresh=chShuf(fresh).slice(0,10);
   }
-  S.ch={date:todayStr(),theme:th,rv:3,ids:fresh.map(wkey),cnt:(S.ch&&S.ch.cnt)||{}};
+  S.chSalt="";
+  S.ch={date:todayStr(),theme:th,rv:4,ids:fresh.map(wkey),cnt:(S.ch&&S.ch.cnt)||{}};
   saveCh();
 }
 function chWords(){
@@ -7038,7 +7041,7 @@ document.addEventListener("click",function(ev){
     S.chRes=null;S.chPicked=null;S.chInput="";window.scrollTo(0,0);render();return;}
   if(a==="chnew"){                       /* 오늘 단어를 새로 뽑는다 (테마는 그대로) */
     if(!confirm("오늘 단어 10개를 새로 뽑을까요? 지금까지의 진행은 사라집니다."))return;
-    var th0=chTheme();S.ch={date:"",theme:"",ids:[],cnt:{}};saveCh();ensureChallenge(th0);
+    var th0=chTheme();S.chSalt=String(Date.now());S.ch={date:"",theme:"",ids:[],cnt:{}};saveCh();ensureChallenge(th0);
     S.cTodayIdx=0;S.cSeq=null;
     S.chQ=null;S.chRes=null;S.chPicked=null;S.chInput="";window.scrollTo(0,0);render();return;}
   if(a==="chtheme"){                     /* 오늘 단어의 테마를 바꾼다 */
