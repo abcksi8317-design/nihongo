@@ -921,9 +921,20 @@ function loadVoices(){
   if(!window.speechSynthesis)return;
   var vs=window.speechSynthesis.getVoices()||[];
   voiceCount=vs.length;
-  for(var i=0;i<vs.length;i++){
-    if((vs[i].lang||"").toLowerCase().replace("_","-").indexOf("ja")===0){voiceJa=vs[i];return;}
+  var best=null,bs=-99,i,v,sc,nm;
+  for(i=0;i<vs.length;i++){
+    v=vs[i];
+    if((v.lang||"").toLowerCase().replace("_","-").indexOf("ja")!==0)continue;
+    nm=(v.name||"");sc=0;
+    /* 자연스러운 목소리를 먼저: 고품질·온라인 음성 우대, 압축·기계음 감점 */
+    if(/natural|neural|premium|enhanced|online/i.test(nm))sc+=4;
+    if(/google/i.test(nm))sc+=3;
+    if(/kyoko|otoya|o-ren|nanami|keita|haruka|ayumi|sayaka|ichiro/i.test(nm))sc+=2;
+    if(/siri/i.test(nm))sc+=1;
+    if(/compact|espeak|robot/i.test(nm))sc-=4;
+    if(sc>bs){bs=sc;best=v;}
   }
+  if(best)voiceJa=best;
 }
 if(window.speechSynthesis){
   loadVoices();
@@ -969,7 +980,72 @@ function splitJa(t){
   if(cur)out.push(cur);
   return out.length?out:[t];
 }
+/* ---- 읽어 주기 전에 한자를 정확한 가나로 바꿉니다 ---- */
+/* 앱이 가진 단어·활용 엔진의 읽기를 사전으로 만들어, 한자 그대로 읽다가 틀리는 일(예: 角 → 모퉁이가 아닌 다른 소리)을 막습니다. */
+var SAYREG={},TMAP=null,TAMB={};
+function sayReg(jp,kana){if(jp&&kana&&jp!==kana&&KANJI.test(jp))SAYREG[jp]=kana;}
+function tmapBuild(){
+  var cand={},ws,FV=["masu","masen","mashita","masendeshita","te","ta","nai","nakatta","tari","nakattari",
+    "tai","takunai","takatta","takunakatta","istem","poten","potenM","potenN","caus","causM","causPast","pass","passM","passPast",
+    "cpass","cpass2","cpassPast","vol","volOmou","ba","tara","jisho","koto","tsumori","tsumoriN","sonkeiR","oNaru","oSuru","oKudasai"];
+  function put(j,k){
+    if(!j||!k||j===k||!KANJI.test(j))return;
+    var c=cand[j]||(cand[j]={n:{},o:[]});
+    if(!c.n[k]){c.n[k]=0;c.o.push(k);}
+    c.n[k]++;
+  }
+  try{ws=allWords().slice();}catch(e){ws=[];}
+  try{N5VERBS.forEach(function(v){ws.unshift({jp:v.jp,kana:v.kana,ko:v.ko||""});});}catch(e){}
+  ws.forEach(function(w){
+    var k=w.kana||w.jp,p;
+    put(w.jp,k);
+    try{p=wPos(w);}catch(e){p="n";}
+    try{
+      if(p==="v"){FV.forEach(function(f){try{var r=conjugate(w.jp,k,f);put(r.jp,r.kana);}catch(e1){}});}
+      else if(p==="i"){["desu","janai","deshita","janakatta","te","ta","nai","tari","ba","tara","adv","mod"].forEach(function(f){put(ybAdjI(w.jp,f),ybAdjI(k,f));});}
+      else{
+        var b=(p==="na")?naBase(w):w,bk=b.kana||b.jp;
+        put(b.jp,bk);
+        ["desu","janai","deshita","janakatta","te","ta","nai","tari","mod","adv","nara","tara"].forEach(function(f){put(ybNoun(b.jp,f),ybNoun(bk,f));});
+      }
+    }catch(e2){}
+  });
+  TMAP={};TAMB={};
+  Object.keys(cand).forEach(function(j){
+    var c=cand[j],best=c.o[0],i;
+    for(i=1;i<c.o.length;i++)if(c.n[c.o[i]]>c.n[best])best=c.o[i];   /* 가장 많이 나오는 읽기 */
+    TMAP[j]=best;
+    if(c.o.length>1)TAMB[j]=c.o;
+  });
+}
+function ttsPrep(t){
+  if(!t||!KANJI.test(t))return t;
+  if(SAYREG[t])return SAYREG[t];
+  if(!TMAP){try{tmapBuild();}catch(e){TMAP={};}}
+  var rain=/[雨雪霰雹]/.test(t),out="",i=0,n=t.length,L,seg,hit,rd;
+  while(i<n){
+    hit=false;
+    for(L=Math.min(14,n-i);L>=1;L--){
+      seg=t.substr(i,L);
+      rd=TMAP[seg];
+      if(rd!==undefined){
+        if(TAMB[seg]&&seg.indexOf("降")>=0){          /* 降る(ふる) / 降りる(おりる) 는 문맥으로 가립니다 */
+          var al=TAMB[seg].filter(function(x){return rain?/ふ/.test(x):!/ふ/.test(x);});
+          if(al.length)rd=al[0];
+        }
+        out+=rd;i+=L;hit=true;break;
+      }
+      if(L<=7&&KMAP[seg]){out+=KMAP[seg];i+=L;hit=true;break;}
+    }
+    if(!hit){
+      if(KANJI.test(t.charAt(i)))return t;             /* 모르는 한자가 있으면 원문 그대로 */
+      out+=t.charAt(i);i++;
+    }
+  }
+  return out;
+}
 function say(text,rate){
+  text=ttsPrep(text);
   return new Promise(function(res){
     if(!window.speechSynthesis){setTimeout(res,600);return;}
     try{
@@ -2417,12 +2493,12 @@ var S={
   chQ:null, chPicked:null, chRes:null, chInput:"", chAdvance:false,
   wkRange:7, wkQuiz:null, wkQi:0, wkPicked:null, wkScore:0, wkWrong:[], chPeek:false,
   piQ:null, piPicked:null, piScore:0, piTotal:0,
-  rdIdx:null, rdKana:false, rdKo:false, rdKp:false, rdAll:false, rdAns:{}, rdDone:LS.get("jp.rd",{}),
+  rdIdx:null, rdRep:LS.get("jp.rdrep",1), rdLRep:LS.get("jp.rdlrep",1), rdPlaying:false, rdTok:0, rdKana:false, rdKo:false, rdKp:false, rdAll:false, rdAns:{}, rdDone:LS.get("jp.rd",{}),
   day:LS.get("jp.day",{date:"",drill:0,read:0,test:0}), wkLast:LS.get("jp.wk",null),
   jQ:null, jPicked:null, jScore:0, jTotal:0, jSets:[],
   recOpen:null, radIdx:null, radQuiz:false, rqQ:null, rqPicked:null, rqScore:0, rqTotal:0,
-  cAskPos:true, cPosPicked:null, cPosShow:false, cQMode:"ko", cShuffle:true, cHint:false,
-  cType:"all", cToday:true, cTodayIdx:0, cBlocks:["c_po","c_pl","c_te"], cWord:null, cTypeNow:"v", cSeq:null, cIdx:0,
+  cAskPos:true, cPosPicked:null, cPosShow:false, cQMode:"ko", cShuffle:false, cHint:false,
+  cType:"all", cPer:0, cToday:true, cTodayIdx:0, cBlocks:["c_te","c_pl","c_po"], cWord:null, cTypeNow:"v", cSeq:null, cIdx:0,
   cRes:null, cInput:"", cScore:0, cTotal:0, cDone:0,
   gc:false, gcIdx:0, gGrp:null, gKo:true, ybGrp:null, ybCat:"masu", ybPol:{}, ybSec:0, ybQ:null, ybRes:null, ybInput:"", ybScore:0, ybCount:0,
   ybForms:["masu","te","ta","nai"], ybPForms:["desu","te","ta","nai"],
@@ -2568,6 +2644,7 @@ function makeDrill(){
     }
     if(it.key!==last)break;
   }
+  sayReg(it.jp,it.kana);
   S.dItem=it;S.dRev=false;S.dPicked=null;
 }
 var runId=0;
@@ -4736,14 +4813,14 @@ function chBuild(fixW,fixT){
     koF=[ (tp==="v"? w.ko : (tp==="n"? kc.ta.replace(/었다$|였다$/,"다") : w.ko)),
           kc.nai, kc.ta, kc.nai.replace(/지 않다$/,"지 않았다").replace(/[이가] 아니다$/, function(m){return m.replace("아니다","아니었다");}) ];
   }
-  if(blocks.indexOf("c_po")>=0)
-    for(i=0;i<4;i++){var fp=futsuPair(w,tp,TT[i]);
-      seq.push({label:lab[i],ans:fp.p,ansK:fp.pk,ko:koP[i],why:"정중형 — です·ます를 쓰는 말투"});}
+  if(blocks.indexOf("c_te")>=0){var te=chTeForm(w,tp);
+    seq.push({label:"て형",ans:te.jp,ansK:te.kana,ko:kc?kc.te:"",why:te.why});}
   if(blocks.indexOf("c_pl")>=0)
     for(i=0;i<4;i++){var fp2=futsuPair(w,tp,TT[i]);
       seq.push({label:lab2[i],ans:fp2.f,ansK:fp2.fk,ko:koF[i],why:"보통형 — 반말. そうだ·らしい·でしょう가 여기에 붙습니다"});}
-  if(blocks.indexOf("c_te")>=0){var te=chTeForm(w,tp);
-    seq.push({label:"て형",ans:te.jp,ansK:te.kana,ko:kc?kc.te:"",why:te.why});}
+  if(blocks.indexOf("c_po")>=0)
+    for(i=0;i<4;i++){var fp=futsuPair(w,tp,TT[i]);
+      seq.push({label:lab[i],ans:fp.p,ansK:fp.pk,ko:koP[i],why:"정중형 — です·ます를 쓰는 말투"});}
   if(blocks.indexOf("c_ex")>=0){
     if(tp==="v"&&(STATIVE[w.jp]||NONVOL[w.jp]||INANIM[w.jp])){ /* 상태·무의지 동사는 확장 5형을 만들지 않습니다 */ }
     else if(tp==="v"){
@@ -4772,7 +4849,12 @@ function chBuild(fixW,fixT){
         why:(tp==="i")?"い형용사는 い를 떼고 く":"な형용사는 に"});
     }
   }
+  if(S.cPer&&seq.length>1){                 /* 단어당 1문장 — 날마다·단어마다 다른 형태가 나오도록 돌려 가며 고릅니다 */
+    var ri=S.cToday?((S.cTodayIdx*5+Math.floor(Date.now()/86400000))%seq.length):Math.floor(Math.random()*seq.length);
+    seq=[seq[ri]];
+  }
   if(S.cShuffle)seq=shuffle(seq);
+  sayReg(w.jp,w.kana);seq.forEach(function(x){sayReg(x.ans,x.ansK);});
   S.cWord=w;S.cTypeNow=tp;S.cSeq=seq;S.cIdx=0;S.cRes=null;S.cInput="";S.cPosPicked=null;
 }
 function viewChain(){
@@ -4791,13 +4873,14 @@ function viewChain(){
     h+='</div>';
   }
   h+='<div class="lab">연습할 묶음 (여러 개 선택)</div><div class="chips">';
-  [["c_po","정중형 4단"],["c_pl","보통형 4단"],["c_te","て형"],["c_ex","확장 5형 (가능·사역·수동·사역수동·의지)"]].forEach(function(b){
+  [["c_te","て형"],["c_pl","보통형 4단 (사전·ない·た·なかった)"],["c_po","정중형 4단 (ます)"],["c_ex","확장 5형 (가능·사역·수동·사역수동·의지)"]].forEach(function(b){
     h+='<button class="chip sm" data-on="'+(S.cBlocks.indexOf(b[0])>=0?1:0)+'" data-a="cblock" data-v="'+b[0]+'">'+b[1]+'</button>';});
   h+='</div>';
 
   h+='<div class="chips" style="margin-bottom:10px">'+
      '<button class="chip sm" data-on="'+(S.cAskPos?1:0)+'" data-a="caskpos">품사 먼저 '+(S.cAskPos?"켜짐":"꺼짐")+'</button>'+
      '<button class="chip sm" data-on="'+(S.cQMode==="ko"?1:0)+'" data-a="cqmode">'+(S.cQMode==="ko"?"한국어로 묻기":"형태 이름으로 묻기")+'</button>'+
+     '<button class="chip sm" data-on="'+(S.cPer?1:0)+'" data-a="cper">'+(S.cPer?"단어당 1문장":"단어당 전체 형태")+'</button>'+
      '<button class="chip sm" data-on="'+(S.cShuffle?1:0)+'" data-a="cshuffle">'+(S.cShuffle?"무작위 순서":"순서대로")+'</button></div>';
   if(!S.cSeq||!S.cSeq.length)chBuild();
   var w=S.cWord,tn={v:"동사",i:"い형용사",na:"な형용사",n:"명사"}[S.cTypeNow];
@@ -6507,80 +6590,749 @@ var READS=[
 function rdHash(s){var h=5381,i;for(i=0;i<s.length;i++)h=((h*33)^s.charCodeAt(i))>>>0;return h;}
 function rdRng(seed){var s=seed>>>0;return function(){s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};}
 function rdShuf(a,rng){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(rng()*(i+1)),t=a[i];a[i]=a[j];a[j]=t;}return a;}
-function rdGenLine(w,i){
-  var p=wPos(w),m=koSplit(w.ko||"")||(w.ko||""),jp=w.jp,ka=w.kana||w.jp;
-  function mk(pj,pk,jj,kk,sj,sk,ko){return [pj+jj+sj,pk+kk+sk,ko];}
-  if(p==="n"&&/다$/.test(m)){                       /* 받다 (겸양) 처럼 괄호가 붙은 동사 */
-    if(/[うくぐすつぬぶむる]$/.test(ka))p="v";
-    else if(/い$/.test(ka))p="i";
-  }
-  if(p==="n"&&/な$/.test(jp)&&jp.length>1)          /* 大きな·小さな 같은 연체사 */
-    return [jp+"家です。",ka+"いえです。",m+" 집입니다."];
-  if(p==="v"){
-    var kc=koConj(w.ko||"","v"),odd=STATIVE[jp]||INANIM[jp]||NONVOL[jp],f,r,k;
-    if(odd){
-      k=i%3;
-      f=["masu","mashita","masen"][k];r=conjugate(jp,ka,f);
-      var st=STATIVE[jp]?1:0;
-      var pj=st?["今は","昨日は","あまり"][k]:["もうすぐ","さっき","まだ"][k],
-          pk=st?["いまは","きのうは","あまり"][k]:["もうすぐ","さっき","まだ"][k],
-          pc=st?["지금은 ","어제는 ","별로 "][k]:["곧 ","아까 ","아직 "][k];
-      return mk(pj,pk,r.jp,r.kana,"。","。",pc+(kc?[kc.pres,kc.past,kc.neg][k]:m)+".");
-    }
-    k=i%5;
-    f=["masu","mashita","tai","te","masen"][k];r=conjugate(jp,ka,f);
-    if(k===0)return mk("毎日","まいにち",r.jp,r.kana,"。","。","매일 "+(kc?kc.pres:m)+".");
-    if(k===1)return mk("昨日、","きのう、",r.jp,r.kana,"。","。","어제 "+(kc?kc.past:m)+".");
-    if(k===2)return mk("明日は","あしたは",r.jp,r.kana,"。","。","내일은 "+(kc?kc.te+" 싶습니다":m)+".");
-    if(k===3)return mk("",""  ,r.jp,r.kana,"、少し休みます。","、すこしやすみます。",(kc?kc.te:m)+" 잠시 쉽니다.");
-    return mk("あまり","あまり",r.jp,r.kana,"。","。","별로 "+(kc?kc.neg:m)+".");
-  }
-  if(p==="i"||p==="na"){
-    var b=(p==="na")?naBase(w):w,kc2=koConj(w.ko||"","i"),k2=i%3,fm=["desu","deshita","janai"][k2];
-    var aj=(p==="i")?ybAdjI(b.jp,fm):ybNoun(b.jp,fm),ak=(p==="i")?ybAdjI(b.kana,fm):ybNoun(b.kana,fm);
-    var pre=[["今日は","きょうは"],["昨日は","きのうは"],["あまり","あまり"]][k2];
-    var kopre=["오늘은 ","어제는 ","별로 "][k2],kov=kc2?[kc2.pres,kc2.past,kc2.neg][k2]:m;
-    return mk(pre[0],pre[1],aj,ak,"。","。",kopre+kov+".");
-  }
-  if(p==="adv")return [jp+"勉強します。",ka+"べんきょうします。",m+" 공부합니다."];
-  var k3=i%4;
-  if(k3===0)return ["これは"+jp+"です。","これは"+ka+"です。","이것은 "+m+"입니다."];
-  if(k3===1)return [jp+"はどこですか。",ka+"はどこですか。",eun(m)+" 어디입니까?"];
-  if(k3===2)return ["昨日、"+jp+"について話しました。","きのう、"+ka+"についてはなしました。","어제 "+m+"에 대해 이야기했습니다."];
-  return ["それは"+jp+"じゃないです。","それは"+ka+"じゃないです。","그것은 "+m+(bat(m)?"이":"가")+" 아닙니다."];
+/* ====== 읽기 작문 사전 — 단어마다 '말이 되는' 문맥을 사람이 붙여 둔 것 ====== */
+/* RDV: 동사 → [목적어·장소(일본어), 가나, 한국어, 플래그, 한국어 동사 대체형]
+   플래그: n=과거형만 자연스러움(무의지·일어나는 일) f=계획(ます·たい)만 k=ています만 m=아침 e=저녁·밤 x=고정문 */
+var RDV={
+"開く":["窓が","まどが","창문이","n"],
+"開ける":["窓を","まどを","창문을",""],
+"閉まる":["店が","みせが","가게가","n"],
+"閉める":["ドアを","ドアを","문을",""],
+"付く":["部屋の電気が","へやのでんきが","방의 불이","n"],
+"付ける":["テレビを","テレビを","TV를",""],
+"消える":["廊下の電気が","ろうかのでんきが","복도의 불이","n"],
+"消す":["テレビを","テレビを","TV를",""],
+"入る":["静かな部屋に","しずかなへやに","조용한 방에",""],
+"入れる":["かばんに財布を","かばんにさいふを","가방에 지갑을",""],
+"出る":["家を","いえを","집을",""],
+"出す":["かばんから本を","かばんからほんを","가방에서 책을",""],
+"かかる":["ドアに鍵が","ドアにかぎが","문이","n"],
+"かける":["ドアの鍵を","ドアのかぎを","문을",""],
+"始まる":["授業が","じゅぎょうが","수업이","n"],
+"始める":["新しい仕事を","あたらしいしごとを","새 일을",""],
+"止まる":["電車が","でんしゃが","전철이","n"],
+"止める":["車を","くるまを","차를",""],
+"決まる":["旅行の日が","りょこうのひが","여행 날짜가","n"],
+"決める":["旅行の日を","りょこうのひを","여행 날짜를",""],
+"する":["軽い運動を","かるいうんどうを","가벼운 운동을",""],
+"ある":["駅の近くに銀行があります。","えきのちかくにぎんこうがあります。","역 근처에 은행이 있습니다.","x"],
+"分かる":["日本語の文法が","にほんごのぶんぽうが","일본어 문법을","n"],
+"食べる":["おいしいラーメンを","おいしいラーメンを","맛있는 라면을",""],
+"飲む":["温かいお茶を","あたたかいおちゃを","따뜻한 차를",""],
+"行く":["駅の近くのカフェへ","えきのちかくのカフェへ","역 근처 카페에",""],
+"来る":["友だちが家に","ともだちがいえに","친구가 집에","n"],
+"買う":["新しいかばんを","あたらしいかばんを","새 가방을",""],
+"見る":["おもしろい映画を","おもしろいえいがを","재미있는 영화를",""],
+"降る":["雨が","あめが","비가","n","내리다"],
+"困る":["道が分からなくて","みちがわからなくて","길을 몰라서","n"],
+"待つ":["駅で友だちを","えきでともだちを","역에서 친구를",""],
+"聞く":["好きな音楽を","すきなおんがくを","좋아하는 음악을","","듣다"],
+"会う":["久しぶりに友だちに","ひさしぶりにともだちに","오랜만에 친구를",""],
+"要る":["旅行にはパスポートが要ります。","りょこうにはパスポートがいります。","여행에는 여권이 필요합니다.","x"],
+"あげる":["母に花を","ははにはなを","어머니께 꽃을","","주다"],
+"もらう":["友だちからお土産を","ともだちからおみやげを","친구에게서 기념품을",""],
+"くれる":["友だちが私に本を","ともだちがわたしにほんを","친구가 나에게 책을","n","주다"],
+"さしあげる":["先生に花を","せんせいにはなを","선생님께 꽃을","","드리다"],
+"くださる":["先生が私に本をくださいました。","せんせいがわたしにほんをくださいました。","선생님이 나에게 책을 주셨습니다.","x"],
+"貸す":["友だちに本を","ともだちにほんを","친구에게 책을",""],
+"教える":["子どもに日本語を","こどもににほんごを","아이에게 일본어를",""],
+"持つ":["重い荷物を","おもいにもつを","무거운 짐을","","들다"],
+"落ちる":["道で財布が","みちでさいふが","길에서 지갑이","n"],
+"別れる":["駅で友だちと","えきでともだちと","역에서 친구와",""],
+"風邪を引く":["","","","n"],
+"喜ぶ":["プレゼントをもらって","プレゼントをもらって","선물을 받고","n"],
+"なる":["将来、医者に","しょうらい、いしゃに","나중에 의사가","f"],
+"花が咲く":["","","","n"],
+"道を渡る":["","","","n"],
+"足す":["スープに塩を","スープにしおを","수프에 소금을",""],
+"押す":["エレベーターのボタンを","エレベーターのボタンを","엘리베이터 버튼을",""],
+"風が吹く":["","","","n"],
+"見える":["窓から山が","まどからやまが","창문으로 산이","n"],
+"治る":["風邪が","かぜが","감기가","n","낫다"],
+"泣く":["映画を見て","えいがをみて","영화를 보고","n"],
+"泊まる":["駅の近くのホテルに","えきのちかくのホテルに","역 근처 호텔에",""],
+"捨てる":["古い雑誌を","ふるいざっしを","오래된 잡지를",""],
+"忘れる":["家に傘を","いえにかさを","집에 우산을","n"],
+"無くす":["大事な鍵を","だいじなかぎを","중요한 열쇠를","n"],
+"増える":["友だちが","ともだちが","친구가","n"],
+"習う":["ピアノを","ピアノを","피아노를",""],
+"急ぐ":["駅まで","えきまで","역까지",""],
+"覚える":["新しい単語を","あたらしいたんごを","새 단어를",""],
+"片づける":["部屋を","へやを","방을",""],
+"びっくりする":["大きな音に","おおきなおとに","큰 소리에","n"],
+"疲れる":["仕事で","しごとで","일 때문에","n"],
+"過ごす":["家族と","かぞくと","가족과",""],
+"務める":["貿易会社に","ぼうえきがいしゃに","무역 회사에","k"],
+"試験を受ける":["","","",""],
+"辞める":["アルバイトを","アルバイトを","아르바이트를",""],
+"引っ越す":["新しい家に","あたらしいいえに","새 집으로",""],
+"誘う":["友だちを食事に","ともだちをしょくじに","친구를 식사에","","초대하다"],
+"取る":["ボールを","ボールを","공을","","잡다"],
+"遅れる":["約束の時間に","やくそくのじかんに","약속 시간에","n"],
+"怒る":["弟に","おとうとに","동생에게","n"],
+"盗む":["誰かが私のかばんを","だれかがわたしのかばんを","누군가가 내 가방을","n"],
+"刺す":["蜂が子どもを","はちがこどもを","벌이 아이를","n","쏘다"],
+"頼む":["友だちに手伝いを","ともだちにてつだいを","친구에게 도움을",""],
+"呼ぶ":["友だちを家に","ともだちをいえに","친구를 집에",""],
+"踏む":["うっかり友だちの足を","うっかりともだちのあしを","무심코 친구의 발을","n"],
+"眠る":["ぐっすり","ぐっすり","푹","e"],
+"行う":["大きな会議を","おおきなかいぎを","큰 회의를","","하다"],
+"建てる":["公園の近くに家を","こうえんのちかくにいえを","공원 근처에 집을",""],
+"手伝う":["母の料理を","ははのりょうりを","어머니의 요리를",""],
+"預ける":["ホテルに荷物を","ホテルににもつを","호텔에 짐을",""],
+"受け取る":["宅配便を","たくはいびんを","택배를","","받다"],
+"曲がる":["次の角を右に","つぎのかどをみぎに","다음 모퉁이에서 오른쪽으로",""],
+"道に迷う":["","","","n"],
+"空いている":["この席は空いています。","このせきはあいています。","이 자리는 비어 있습니다.","x"],
+"抜く":["指のとげを","ゆびのとげを","손가락의 가시를",""],
+"包む":["プレゼントを","プレゼントを","선물을",""],
+"干す":["洗濯物を","せんたくものを","빨래를",""],
+"沸かす":["お湯を","おゆを","물을",""],
+"鍵をかける":["","","",""],
+"お腹が空く":["","","","n"],
+"喉が渇く":["","","","n"],
+"探す":["なくした鍵を","なくしたかぎを","잃어버린 열쇠를",""],
+"選ぶ":["誕生日のプレゼントを","たんじょうびのプレゼントを","생일 선물을",""],
+"確かめる":["電車の時間を","でんしゃのじかんを","전철 시간을",""],
+"調べる":["ホテルの場所を","ホテルのばしょを","호텔 위치를",""],
+"比べる":["二つの店の値段を","ふたつのみせのねだんを","두 가게의 가격을",""],
+"届く":["荷物が","にもつが","짐이","n"],
+"届ける":["友だちに手紙を","ともだちにてがみを","친구에게 편지를",""],
+"並ぶ":["店の前で","みせのまえで","가게 앞에서",""],
+"進む":["まっすぐ","まっすぐ","곧장",""],
+"戻る":["ホテルに","ホテルに","호텔로",""],
+"続ける":["日本語の勉強を","にほんごのべんきょうを","일본어 공부를",""],
+"やめる":["タバコを","タバコを","담배를",""],
+"片づく":["部屋が","へやが","방이","n"],
+"断る":["友だちの誘いを","ともだちのさそいを","친구의 권유를",""],
+"謝る":["友だちに","ともだちに","친구에게",""],
+"感じる":["春の風を","はるのかぜを","봄바람을",""],
+"気づく":["間違いに","まちがいに","실수를","n"],
+"慣れる":["新しい生活に","あたらしいせいかつに","새로운 생활에","n"],
+"間に合う":["急いだので、電車に間に合いました。","いそいだので、でんしゃにまにあいました。","서둘렀기 때문에 전철 시간에 맞았습니다.","x"],
+"役に立つ":["この辞書は日本語の勉強にとても役に立ちます。","このじしょはにほんごのべんきょうにとてもやくにたちます。","이 사전은 일본어 공부에 매우 도움이 됩니다.","x"],
+"遊ぶ":["公園で子どもと","こうえんでこどもと","공원에서 아이와",""],
+"浴びる":["熱いシャワーを","あついシャワーを","뜨거운 샤워를","e","하다"],
+"洗う":["顔を","かおを","얼굴을","m"],
+"歩く":["公園の中を","こうえんのなかを","공원 안을",""],
+"言う":["友だちに「ありがとう」と","ともだちに「ありがとう」と","친구에게 「고마워」라고",""],
+"いる":["教室に先生がいます。","きょうしつにせんせいがいます。","교실에 선생님이 계십니다.","x"],
+"歌う":["カラオケで好きな歌を","カラオケですきなうたを","노래방에서 좋아하는 노래를","","부르다"],
+"生まれる":["私は小さい町で生まれました。","わたしはちいさいまちでうまれました。","저는 작은 마을에서 태어났습니다.","x"],
+"売る":["店で野菜を","みせでやさいを","가게에서 채소를",""],
+"起きる":["六時に","ろくじに","6시에","m"],
+"置く":["机の上に本を","つくえのうえにほんを","책상 위에 책을",""],
+"送る":["友だちにメールを","ともだちにメールを","친구에게 메일을",""],
+"泳ぐ":["プールで","プールで","수영장에서",""],
+"降りる":["次の駅で","つぎのえきで","다음 역에서","","내리다"],
+"終わる":["仕事が","しごとが","일이","n"],
+"返す":["友だちに本を","ともだちにほんを","친구에게 책을",""],
+"帰る":["家に","いえに","집에","e"],
+"書く":["日記を","にっきを","일기를","e"],
+"借りる":["図書館で本を","としょかんでほんを","도서관에서 책을",""],
+"切る":["ケーキを","ケーキを","케이크를",""],
+"着る":["新しいコートを","あたらしいコートを","새 코트를",""],
+"曇る":["空が","そらが","하늘이","n"],
+"答える":["先生の質問に","せんせいのしつもんに","선생님의 질문에",""],
+"咲く":["庭の花が","にわのはなが","정원의 꽃이","n"],
+"死ぬ":["去年、飼っていた金魚が死にました。","きょねん、かっていたきんぎょがしにました。","작년에 키우던 금붕어가 죽었습니다.","x"],
+"知る":["新しい店を","あたらしいみせを","새 가게를","n","알게 되다"],
+"吸う":["深く息を","ふかくいきを","깊게 숨을","","들이마시다"],
+"住む":["大阪に","おおさかに","오사카에","k"],
+"座る":["ソファに","ソファに","소파에",""],
+"立つ":["窓の前に","まどのまえに","창문 앞에",""],
+"違う":["二人の意見が違います。","ふたりのいけんがちがいます。","두 사람의 의견이 다릅니다.","x"],
+"使う":["新しいスマホを","あたらしいスマホを","새 스마트폰을",""],
+"着く":["空港に","くうこうに","공항에",""],
+"作る":["家族のために料理を","かぞくのためにりょうりを","가족을 위해 요리를",""],
+"勤める":["貿易会社に","ぼうえきがいしゃに","무역 회사에","k"],
+"出かける":["友だちと","ともだちと","친구와",""],
+"できる":["私は日本語が少しできます。","わたしはにほんごがすこしできます。","저는 일본어를 조금 할 수 있습니다.","x"],
+"飛ぶ":["鳥が空を","とりがそらを","새가 하늘을","n"],
+"撮る":["公園で写真を","こうえんでしゃしんを","공원에서 사진을",""],
+"脱ぐ":["玄関で靴を","げんかんでくつを","현관에서 신발을",""],
+"寝る":["十一時に","じゅういちじに","11시에","e"],
+"登る":["友だちと山に","ともだちとやまに","친구와 산에",""],
+"乗る":["バスに","バスに","버스를",""],
+"履く":["新しい靴を","あたらしいくつを","새 신발을",""],
+"働く":["会社で","かいしゃで","회사에서",""],
+"話す":["友だちと日本語で","ともだちとにほんごで","친구와 일본어로",""],
+"払う":["レジでお金を","レジでおかねを","계산대에서 돈을",""],
+"晴れる":["空が","そらが","하늘이","n","개다"],
+"引く":["ドアを","ドアを","문을",""],
+"弾く":["ギターを","ギターを","기타를",""],
+"磨く":["歯を","はを","이를","e"],
+"見せる":["友だちに写真を","ともだちにしゃしんを","친구에게 사진을",""],
+"休む":["家でゆっくり","いえでゆっくり","집에서 푹",""],
+"読む":["面白い本を","おもしろいほんを","재미있는 책을",""],
+"渡す":["友だちにプレゼントを","ともだちにプレゼントを","친구에게 선물을",""],
+"渡る":["橋を","はしを","다리를",""],
+"笑う":["友だちの冗談に","ともだちのじょうだんに","친구의 농담에",""],
+"勉強する":["図書館で日本語を","としょかんでにほんごを","도서관에서 일본어를",""],
+"洗濯する":["","","",""],
+"掃除する":["部屋を","へやを","방을",""],
+"買い物する":["デパートで","デパートで","백화점에서",""],
+"旅行する":["家族と京都を","かぞくときょうとを","가족과 교토를",""],
+"結婚する":["来年","らいねん","내년에","f"],
+"電話する":["母に","ははに","어머니께",""],
+"散歩する":["公園を","こうえんを","공원을",""],
+"練習する":["ピアノを","ピアノを","피아노를",""]
+};
+/* RDA: 형용사(い·な 어간) → [주어구(조사 포함), 가나, 한국어, 한국어 서술어 대체형] */
+var RDA={
+"危ない":["この道は","このみちは","이 길은"],
+"涼しい":["朝の風は","あさのかぜは","아침 바람은"],
+"暖かい":["部屋の中は","へやのなかは","방 안은"],
+"背が高い":["弟は","おとうとは","동생은"],
+"詳しい":["先生は日本の歴史に","せんせいはにほんのれきしに","선생님은 일본 역사를","잘 알다"],
+"かゆい":["背中が","せなかが","등이"],
+"遠い":["家から駅は","いえからえきは","집에서 역은"],
+"辛い":["このカレーは","このカレーは","이 카레는"],
+"甘い":["このケーキは","このケーキは","이 케이크는"],
+"しょっぱい":["このスープは","このスープは","이 수프는"],
+"苦い":["この薬は","このくすりは","이 약은"],
+"酸っぱい":["このレモンは","このレモンは","이 레몬은"],
+"高い":["このかばんは","このかばんは","이 가방은"],
+"安い":["この店の野菜は","このみせのやさいは","이 가게의 채소는"],
+"大きい":["この犬は","このいぬは","이 개는"],
+"小さい":["私の部屋は","わたしのへやは","내 방은"],
+"痛い":["頭が","あたまが","머리가"],
+"蒸し暑い":["夏の東京は","なつのとうきょうは","여름의 도쿄는"],
+"肌寒い":["今朝は","けさは","오늘 아침은"],
+"嬉しい":["プレゼントをもらって","プレゼントをもらって","선물을 받아서"],
+"悲しい":["映画の最後が","えいがのさいごが","영화의 결말이"],
+"楽しい":["友だちとの旅行は","ともだちとのりょこうは","친구와의 여행은"],
+"寂しい":["一人の夜は","ひとりのよるは","혼자인 밤은"],
+"怖い":["夜の道は","よるのみちは","밤길은"],
+"恥ずかしい":["人前で話すのは","ひとまえではなすのは","사람들 앞에서 말하는 것은"],
+"羨ましい":["友だちの新しい家が","ともだちのあたらしいいえが","친구의 새 집이"],
+"眠い":["昼ごはんの後は","ひるごはんのあとは","점심 식사 후에는"],
+"新しい":["このスマホは","このスマホは","이 스마트폰은"],
+"古い":["この建物は","このたてものは","이 건물은"],
+"暑い":["夏は","なつは","여름은"],
+"寒い":["冬は","ふゆは","겨울은"],
+"おいしい":["このラーメンは","このラーメンは","이 라면은"],
+"忙しい":["今週は","こんしゅうは","이번 주는"],
+"面白い":["この本は","このほんは","이 책은"],
+"難しい":["日本語の漢字は","にほんごのかんじは","일본어 한자는"],
+"早い":["うちの朝は","うちのあさは","우리 집의 아침은"],
+"いい":["今日の天気は","きょうのてんきは","오늘 날씨는"],
+"多い":["駅の人は","えきのひとは","역의 사람은"],
+"少ない":["この町の公園は","このまちのこうえんは","이 동네의 공원은"],
+"遅い":["この電車は","このでんしゃは","이 전철은"],
+"広い":["この公園は","このこうえんは","이 공원은"],
+"狭い":["私の部屋は","わたしのへやは","내 방은"],
+"近い":["家から駅は","いえからえきは","집에서 역은"],
+"幸せ":["家族といる時は","かぞくといるときは","가족과 있을 때는"],
+"おしゃれ":["彼女の服は","かのじょのふくは","그녀의 옷은"],
+"大事":["健康は","けんこうは","건강은"],
+"嫌":["私は雨の日が","わたしはあめのひが","저는 비 오는 날이"],
+"元気":["祖父は","そふは","할아버지는","건강하다"],
+"好き":["私は果物が","わたしはくだものが","저는 과일을"],
+"上手":["姉は料理が","あねはりょうりが","언니는 요리를"],
+"親切":["駅員さんは","えきいんさんは","역무원은"],
+"きれい":["この公園は","このこうえんは","이 공원은"],
+"大変":["仕事は","しごとは","일은"],
+"簡単":["この問題は","このもんだいは","이 문제는"],
+"まじめ":["弟は","おとうとは","동생은"],
+"暇":["今週末は","こんしゅうまつは","이번 주말은"],
+"にぎやか":["駅の前は","えきのまえは","역 앞은"],
+"大切":["約束は","やくそくは","약속은"],
+"安全":["この町は","このまちは","이 동네는"],
+"静か":["図書館は","としょかんは","도서관은"],
+"便利":["地下鉄は","ちかてつは","지하철은"],
+"有名":["この店は","このみせは","이 가게는"]
+};
+/* RDADV: 부사 → 고정 예문 [일본어, 가나, 한국어] */
+var RDADV={
+"一生懸命":["今日は一生懸命、日本語を勉強しました。","きょうはいっしょうけんめい、にほんごをべんきょうしました。","오늘은 열심히 일본어를 공부했습니다."],
+"改めて":["先生の説明を聞いて、改めて文法の大切さが分かりました。","せんせいのせつめいをきいて、あらためてぶんぽうのたいせつさがわかりました。","선생님의 설명을 듣고 문법의 중요함을 새삼 알게 되었습니다."],
+"まっすぐ":["駅からまっすぐ行くと、郵便局があります。","えきからまっすぐいくと、ゆうびんきょくがあります。","역에서 곧장 가면 우체국이 있습니다."],
+"別の":["この店は高いので、別の店に行きました。","このみせはたかいので、べつのみせにいきました。","이 가게는 비싸서 다른 가게에 갔습니다."],
+"びっくり":["友だちが急に来て、びっくりしました。","ともだちがきゅうにきて、びっくりしました。","친구가 갑자기 와서 깜짝 놀랐습니다."],
+"がっかり":["楽しみにしていた映画が終わっていて、がっかりしました。","たのしみにしていたえいががおわっていて、がっかりしました。","기대하던 영화가 끝나 있어서 실망했습니다."],
+"すぐに":["お客さんが来たので、すぐに準備しました。","おきゃくさんがきたので、すぐにじゅんびしました。","손님이 와서 바로 준비했습니다."],
+"後で":["今は忙しいので、後で電話します。","いまはいそがしいので、あとででんわします。","지금은 바빠서 나중에 전화하겠습니다."],
+"早めに":["明日は朝が早いので、早めに寝ます。","あしたはあさがはやいので、はやめにねます。","내일은 아침이 이르니 일찌감치 자겠습니다."],
+"全部":["買った本を全部読みました。","かったほんをぜんぶよみました。","산 책을 전부 읽었습니다."],
+"少し":["日本語を少し話すことができます。","にほんごをすこしはなすことができます。","일본어를 조금 말할 수 있습니다."],
+"たくさん":["公園でたくさん写真を撮りました。","こうえんでたくさんしゃしんをとりました。","공원에서 사진을 많이 찍었습니다."],
+"もっと":["もっと日本語が上手になりたいです。","もっとにほんごがじょうずになりたいです。","더 일본어를 잘하게 되고 싶습니다."],
+"だいたい":["駅まではだいたい十分かかります。","えきまではだいたいじゅっぷんかかります。","역까지는 대략 10분 걸립니다."],
+"ちょうど":["駅に着くと、ちょうど電車が来ました。","えきにつくと、ちょうどでんしゃがきました。","역에 도착하자 마침 전철이 왔습니다."]
+};
+
+/* ====== 오늘 단어 10개로 만드는 읽기 작문 (날짜마다 형식이 바뀌고, 문장은 사전에 있는 '말이 되는' 문맥만 씁니다) ====== */
+function rdKj(n){var d=["","一","二","三","四","五","六","七","八","九"];
+  if(n<10)return d[n];if(n===10)return "十";if(n<20)return "十"+d[n-10];
+  if(n%10===0)return d[Math.floor(n/10)]+"十";return d[Math.floor(n/10)]+"十"+d[n%10];}
+var RD_MK=["","いちがつ","にがつ","さんがつ","しがつ","ごがつ","ろくがつ","しちがつ","はちがつ","くがつ","じゅうがつ","じゅういちがつ","じゅうにがつ"];
+var RD_DK=["","ついたち","ふつか","みっか","よっか","いつか","むいか","なのか","ようか","ここのか","とおか","じゅういちにち","じゅうににち","じゅうさんにち","じゅうよっか","じゅうごにち","じゅうろくにち","じゅうしちにち","じゅうはちにち","じゅうくにち","はつか","にじゅういちにち","にじゅうににち","にじゅうさんにち","にじゅうよっか","にじゅうごにち","にじゅうろくにち","にじゅうしちにち","にじゅうはちにち","にじゅうくにち","さんじゅうにち","さんじゅういちにち"];
+var RD_WJ=["日曜日","月曜日","火曜日","水曜日","木曜日","金曜日","土曜日"],
+    RD_WK=["にちようび","げつようび","かようび","すいようび","もくようび","きんようび","どようび"],
+    RD_WO=["일요일","월요일","화요일","수요일","목요일","금요일","토요일"];
+var RD_T={
+  am:["朝は","あさは","아침에는"],mo:["今朝は","けさは","오늘 아침에는"],pm:["午後は","ごごは","오후에는"],
+  ev:["夕方は","ゆうがたは","저녁 무렵에는"],ni:["夜は","よるは","밤에는"],yd:["昨日は","きのうは","어제는"],
+  td:["今日は","きょうは","오늘은"],lw:["先週は","せんしゅうは","지난주에는"],
+  sat:["土曜日の朝は","どようびのあさは","토요일 아침에는"],satp:["土曜日の午後は","どようびのごごは","토요일 오후에는"],
+  sunn:["日曜日の夜は","にちようびのよるは","일요일 밤에는"],tmr:["明日は","あしたは","내일은"],
+  wk:["今度の週末は","こんどのしゅうまつは","이번 주말에는"],nw:["来週は","らいしゅうは","다음 주에는"],
+  now:["今は","いまは","지금은"],xa:["それから、","それから、","그리고 나서 "],xb:["そのあと、","そのあと、","그 뒤에 "],
+  xc:["寝る前に、","ねるまえに、","자기 전에 "],xd:["帰る前に、","かえるまえに、","돌아오기 전에 "]
+};
+var RD_WEA={
+  winter:[["今日は朝から冷たい風が吹いています。","きょうはあさからつめたいかぜがふいています。","오늘은 아침부터 찬 바람이 불고 있습니다."],
+          ["今朝は息が白くなるほど寒かったです。","けさはいきがしろくなるほどさむかったです。","오늘 아침은 입김이 하얘질 만큼 추웠습니다."],
+          ["今日は一日中、空気が冷たいです。","きょうはいちにちじゅう、くうきがつめたいです。","오늘은 하루 종일 공기가 차갑습니다."]],
+  spring:[["今日は暖かい春の日です。","きょうはあたたかいはるのひです。","오늘은 따뜻한 봄날입니다."],
+          ["窓の外から、春の風が入ってきます。","まどのそとから、はるのかぜがはいってきます。","창밖에서 봄바람이 들어옵니다."],
+          ["今日は天気がよくて、気持ちがいいです。","きょうはてんきがよくて、きもちがいいです。","오늘은 날씨가 좋아서 기분이 좋습니다."]],
+  summer:[["今日は朝から日差しが強いです。","きょうはあさからひざしがつよいです。","오늘은 아침부터 햇볕이 강합니다."],
+          ["今日は蒸し暑い一日でした。","きょうはむしあついいちにちでした。","오늘은 후텁지근한 하루였습니다."],
+          ["夕方になって、少し涼しくなりました。","ゆうがたになって、すこしすずしくなりました。","저녁이 되어 조금 시원해졌습니다."]],
+  autumn:[["今日は空が高くて、気持ちのいい秋の日です。","きょうはそらがたかくて、きもちのいいあきのひです。","오늘은 하늘이 높고 기분 좋은 가을날입니다."],
+          ["朝と夜は、少し涼しくなりました。","あさとよるは、すこしすずしくなりました。","아침과 밤은 조금 선선해졌습니다."],
+          ["今日は秋らしい、静かな一日です。","きょうはあきらしい、しずかないちにちです。","오늘은 가을다운 조용한 하루입니다."]]
+};
+function koFixI(s){return String(s).replace(/낫았/g,"나았").replace(/짓었/g,"지었").replace(/낫었/g,"나았").replace(/칠렀/g,"치렀").replace(/조웠/g,"좁았");}
+function rdPlain(w){var m=koSplit(w.ko||"");return m||(w.ko||"");}
+function rdJoinKo(){return Array.prototype.slice.call(arguments).filter(function(x){return x;}).join(" ").replace(/\s+/g," ").trim();}
+/* 동사 한 문장: kind = past | fut | tai | neg | ing */
+function rdVLine(w,step,rng){
+  var e=RDV[w.jp],fl=e[3]||"",kind=step.kind,tm=step.time;
+  if(fl.indexOf("x")>=0)return {l:[e[0],e[1],e[2]],kind:"x"};
+  if(fl.indexOf("k")>=0){kind="ing";tm=RD_T.now;}
+  else if(fl.indexOf("f")>=0){kind=(rng()<0.5)?"tai":"fut";tm=null;}
+  else if(fl.indexOf("n")>=0&&kind!=="past"){kind="past";tm=step.alt||RD_T.yd;}
+  else if(fl.indexOf("m")>=0&&kind==="past")tm=RD_T.mo;
+  else if(fl.indexOf("e")>=0&&kind==="past")tm=RD_T.ni;
+  var koV=e[4]||rdPlain(w),kc=koConj(koV,"v"),jf,ko;
+  if(!kc)return null;
+  if(kind==="past")jf=conjugate(w.jp,w.kana,"mashita");
+  else if(kind==="fut")jf=conjugate(w.jp,w.kana,"masu");
+  else if(kind==="tai")jf=conjugate(w.jp,w.kana,"tai");
+  else if(kind==="neg")jf=conjugate(w.jp,w.kana,"masendeshita");
+  else{var t0=conjugate(w.jp,w.kana,"te");jf={jp:t0.jp+"います",kana:t0.kana+"います"};}
+  ko=(kind==="past")?kc.past:(kind==="fut")?kc.pres:(kind==="tai")?(kc.te+" 싶습니다"):(kind==="neg")?kc.pastNeg:(kc.te+" 있습니다");
+  var jp=(tm?tm[0]:"")+e[0]+jf.jp+"。",ka=(tm?tm[1]:"")+e[1]+jf.kana+"。";
+  var kk=koFixI(rdJoinKo(tm?tm[2]:"",e[2],ko))+".";
+  return {l:[jp,ka,kk],kind:kind,time:tm,ans:koFixI(rdJoinKo(e[2],ko))};
 }
+function rdALine(w,form){
+  var p=wPos(w),b=(p==="na")?naBase(w):w,e=RDA[b.jp];if(!e)return null;
+  var f={now:"desu",past:"deshita",neg:"janai"}[form],ka0=b.kana||b.jp;
+  var kc=koConj(e[3]||rdPlain(w),"i");if(!kc)return null;
+  var aj=(p==="i")?ybAdjI(b.jp,f):ybNoun(b.jp,f),ak=(p==="i")?ybAdjI(ka0,f):ybNoun(ka0,f);
+  var ko=(form==="now")?kc.pres:(form==="past")?kc.past:kc.neg;
+  return {l:[e[0]+aj+"。",e[1]+ak+"。",rdJoinKo(e[2],ko)+"."],ans:ko,subj:e[2],pre:e[0],prek:e[1],aj:aj,ak:ak};
+}
+var RD_NV=[
+  function(w,m,ka){return ["今日は「"+w.jp+"」という言葉を覚えました。","きょうは「"+ka+"」ということばをおぼえました。","오늘은 「"+w.jp+"」("+m+")라는 말을 외웠습니다."];},
+  function(w,m,ka){return ["先生に「"+w.jp+"」の使い方を聞きました。","せんせいに「"+ka+"」のつかいかたをききました。","선생님께 「"+w.jp+"」("+m+")의 사용법을 물어보았습니다."];},
+  function(w,m,ka){return ["「"+w.jp+"」を使って、短い文を作りました。","「"+ka+"」をつかって、みじかいぶんをつくりました。","「"+w.jp+"」("+m+")을 사용해서 짧은 문장을 만들었습니다."];},
+  function(w,m,ka){return ["「"+w.jp+"」は大切な言葉なので、ノートに書きました。","「"+ka+"」はたいせつなことばなので、ノートにかきました。","「"+w.jp+"」("+m+")는 중요한 말이라서 노트에 적었습니다."];},
+  function(w,m,ka){return ["「"+w.jp+"」という言葉は、今日初めて知りました。","「"+ka+"」ということばは、きょうはじめてしりました。","「"+w.jp+"」("+m+")라는 말은 오늘 처음 알았습니다."];},
+  function(w,m,ka){return ["家に帰って、「"+w.jp+"」をもう一度復習しました。","いえにかえって、「"+ka+"」をもういちどふくしゅうしました。","집에 돌아와서 「"+w.jp+"」("+m+")를 한 번 더 복습했습니다."];},
+  function(w,m,ka){return ["「"+w.jp+"」の読み方は「"+ka+"」です。","「"+ka+"」のよみかたは「"+ka+"」です。","「"+w.jp+"」("+m+")의 읽는 법은 「"+ka+"」입니다."];}
+];
+function rdNLine(w,k){
+  var m=rdPlain(w),ka=w.kana||w.jp,i=k%RD_NV.length;
+  if(i===6&&ka===w.jp)i=0;
+  var r=RD_NV[i](w,m,ka),c=m.charAt(m.length-1),cc=c.charCodeAt(0),hg=cc>=0xAC00&&cc<=0xD7A3,bt=hg?((cc-0xAC00)%28!==0):(/[0-9]/.test(c)?"0136780".indexOf(c)>=0:false),rb=hg&&((cc-0xAC00)%28===8);
+  r[2]=r[2].replace(/\)(을|를)/,")"+(bt?"을":"를")).replace(/\)(은|는)/,")"+(bt?"은":"는")).replace(/\)(이라는|라는)/,")"+(bt?"이라는":"라는"));
+  return r;
+}
+var RD_CNT=[["","",""],["一つ","ひとつ","한 개"],["二つ","ふたつ","두 개"],["三つ","みっつ","세 개"],["四つ","よっつ","네 개"],["五つ","いつつ","다섯 개"],["六つ","むっつ","여섯 개"],["七つ","ななつ","일곱 개"],["八つ","やっつ","여덟 개"],["九つ","ここのつ","아홉 개"],["十","とお","열 개"]];
+var RD_SP={t:["田中：","たなか：","다나카: "],w:["私：","わたし：","나: "]};
+/* 형식 4가지 — 날짜 순서대로 돌아가며 나옵니다 */
+function rdFrames(dt){
+  var m=dt.getMonth()+1,d=dt.getDate(),wd=dt.getDay();
+  var dateL=["今日は"+rdKj(m)+"月"+rdKj(d)+"日、"+RD_WJ[wd]+"です。","きょうは"+RD_MK[m]+RD_DK[d]+"、"+RD_WK[wd]+"です。","오늘은 "+m+"월 "+d+"일 "+RD_WO[wd]+"입니다."];
+  var V=function(tag,kind,time,alt){return {v:1,tag:tag,kind:kind,time:time,alt:alt};},
+      A=function(f){return {a:f};},FX=function(a,b,c){return {fx:[a,b,c]};},
+      SP=function(who,st){st.sp=who;return st;};
+  return [
+    {id:"diary",t:"오늘의 일기",sub:"오늘 하루를 일본어 일기로",gram:["ました형","たい형","형용사 활용"],steps:[
+      {date:dateL},{weather:1},V("am","past",RD_T.am),A("past"),V("pm","past",RD_T.pm),V("ev","past",RD_T.ev),A("now"),V("ni","past",RD_T.ni),
+      {n:1},V("plan","tai",RD_T.tmr,RD_T.td),FX("明日もがんばります。","あしたもがんばります。","내일도 힘내겠습니다.")]},
+    {id:"letter",t:"친구에게 보내는 메시지",sub:"일본인 친구에게 근황 전하기",gram:["です·ます형","ました형","たい형"],steps:[
+      FX("さくらさん、こんにちは。お元気ですか。","さくらさん、こんにちは。おげんきですか。","사쿠라 씨, 안녕하세요. 잘 지내세요?"),
+      FX("私は元気です。最近のことを書きますね。","わたしはげんきです。さいきんのことをかきますね。","저는 잘 지냅니다. 최근 일을 쓸게요."),
+      V("lw","past",RD_T.lw),A("now"),V("yd","past",RD_T.yd),A("past"),
+      FX("日本語の勉強も続けています。","にほんごのべんきょうもつづけています。","일본어 공부도 계속하고 있습니다."),{n:1},
+      V("plan","tai",RD_T.wk,RD_T.lw),FX("お返事を待っています。","おへんじをまっています。","답장을 기다리고 있습니다."),
+      FX("では、また連絡しますね。お体に気をつけてください。","では、またれんらくしますね。おからだにきをつけてください。","그럼 또 연락할게요. 건강 조심하세요.")]},
+    {id:"weekend",t:"지난 주말 이야기",sub:"주말에 한 일을 이야기하기",gram:["ました형","형용사 과거","たい형"],steps:[
+      FX("先週の週末のことを書きます。","せんしゅうのしゅうまつのことをかきます。","지난 주말에 있었던 일을 씁니다."),
+      V("sat","past",RD_T.sat),V("satp","past",RD_T.satp),A("past"),V("sunn","past",RD_T.sunn),A("now"),
+      FX("少し疲れましたが、いい週末でした。","すこしつかれましたが、いいしゅうまつでした。","조금 피곤했지만 좋은 주말이었습니다."),{n:1},
+      V("plan","tai",RD_T.nw,RD_T.lw),FX("今週もがんばりましょう。","こんしゅうもがんばりましょう。","이번 주도 힘냅시다.")]},
+    {id:"talk",t:"일본인 친구와의 대화",sub:"묻고 대답하는 회화 연습",gram:["회화체","ました형","たい형"],steps:[
+      SP("t",FX("こんにちは。昨日は何をしましたか。","こんにちは。きのうはなにをしましたか。","안녕하세요. 어제는 무엇을 했습니까?")),
+      SP("w",V("yd","past",RD_T.yd)),
+      SP("t",FX("そうですか。今日はどうでしたか。","そうですか。きょうはどうでしたか。","그렇군요. 오늘은 어땠습니까?")),
+      SP("w",V("td","past",RD_T.td)),
+      SP("t",FX("最近は、どうですか。","さいきんは、どうですか。","요즘은 어떻습니까?")),
+      SP("w",A("now")),
+      SP("t",FX("そうですか。ほかには？","そうですか。ほかには？","그렇군요. 그밖에는요?")),
+      SP("w",A("past")),SP("w",V("ni","past",RD_T.ni)),
+      SP("t",FX("明日は何をしたいですか。","あしたはなにをしたいですか。","내일은 무엇을 하고 싶습니까?")),
+      SP("w",V("plan","tai",RD_T.tmr,RD_T.td)),
+      SP("t",FX("日本語の勉強はどうですか。","にほんごのべんきょうはどうですか。","일본어 공부는 어떻습니까?")),
+      SP("w",{n:1}),
+      SP("t",FX("がんばってください。","がんばってください。","힘내세요.")),
+      SP("w",FX("ありがとうございます。","ありがとうございます。","감사합니다."))]}
+  ];
+}
+function rdBuild(ws,rng,dt,dayNo){
+  var vs=[],as=[],ad=[],ns=[];
+  ws.forEach(function(w){
+    var p=wPos(w),b=(p==="na")?naBase(w):w;
+    if(RDV[w.jp])vs.push(w);
+    else if((p==="i"||p==="na")&&RDA[b.jp])as.push(w);
+    else if(RDADV[w.jp])ad.push(w);
+    else ns.push(w);
+  });
+  var fr=rdFrames(dt)[((dayNo%4)+4)%4],steps=fr.steps.slice(),lines=[],facts=[],used=[],i;
+  /* 동사·형용사가 계획보다 많으면 단계를 덧붙입니다 */
+  var vSteps=steps.filter(function(s){return (s.v||(s.sp&&s.v))&&s.tag!=="plan";}).length;
+  var aSteps=steps.filter(function(s){return s.a;}).length;
+  var nIdx=-1;steps.forEach(function(s,ix){if(s.n&&nIdx<0)nIdx=ix;});
+  if(nIdx<0)nIdx=steps.length;
+  var extra=[],xt=["xa","xb","xc","xd"],xi=0;
+  for(i=vSteps;i<vs.length;i++){extra.push({v:1,tag:"x",kind:"past",time:RD_T[xt[xi++%4]],alt:RD_T.yd});}
+  for(i=aSteps;i<as.length+ad.length;i++)extra.push({a:"now"});
+  Array.prototype.splice.apply(steps,[nIdx,0].concat(extra));
+  var curK="";
+  function pushL(l,who){
+    if(!who&&fr.id==="talk")who="w";
+    if(who&&RD_SP[who])l=[RD_SP[who][0]+l[0],RD_SP[who][1]+l[1],RD_SP[who][2]+l[2]];
+    l.k=curK;lines.push(l);
+  }
+  function takeV(tag){
+    var ix=-1,k,fl;
+    for(k=0;k<vs.length&&ix<0;k++){fl=RDV[vs[k].jp][3]||"";
+      if((tag==="am"&&fl.indexOf("m")>=0)||((tag==="ni"||tag==="ev")&&fl.indexOf("e")>=0))ix=k;}
+    for(k=0;k<vs.length&&ix<0;k++){fl=RDV[vs[k].jp][3]||"";if(!/[me]/.test(fl))ix=k;}
+    if(ix<0&&vs.length)ix=0;
+    return ix<0?null:vs.splice(ix,1)[0];
+  }
+  steps.forEach(function(s){
+    var who=s.sp||null,r,w,ix;
+    curK=s.date?"d":s.weather?"w":s.fx?"f":s.v?(s.tag==="plan"?"p":"v"):s.a?"a":s.n?"n":"";
+    if(s.date){pushL(s.date,who);return;}
+    if(s.weather){var sn=dt.getMonth()+1,sea=(sn===12||sn<=2)?"winter":(sn<=5)?"spring":(sn<=8)?"summer":"autumn";
+      pushL(RD_WEA[sea][Math.floor(rng()*3)],who);return;}
+    if(s.fx){pushL(s.fx,who);return;}
+    if(s.v){
+      w=takeV(s.tag);
+      if(!w&&s.tag==="plan"&&used.length){                       /* 새 동사가 없으면 앞에 쓴 동사로 〜たい 문장을 만듭니다 */
+        var cand=used.filter(function(u){var f=RDV[u.jp][3]||"";return !/[nkfx]/.test(f);});
+        if(cand.length)w=cand[Math.floor(rng()*cand.length)];
+      }
+      if(!w)return;
+      r=rdVLine(w,s,rng);if(!r)return;
+      if(used.indexOf(w)<0)used.push(w);
+      pushL(r.l,who);
+      if(r.kind==="past"&&r.ans&&r.time)facts.push({time:r.time,ans:r.ans,jp:r.l[0],ko:r.l[2]});
+      return;
+    }
+    if(s.a){
+      if(as.length){w=as.shift();r=rdALine(w,s.a);if(r){r.l.adj=r;pushL(r.l,who);return;}}
+      if(ad.length){w=ad.shift();pushL(RDADV[w.jp],who);}
+      return;
+    }
+    if(s.n){
+      if(!ns.length)return;
+      var c=RD_CNT[Math.min(ns.length,10)];
+      pushL(["今日は新しい言葉を"+c[0]+"勉強しました。","きょうはあたらしいことばを"+c[1]+"べんきょうしました。","오늘은 새 단어를 "+c[2]+" 공부했습니다."],who);
+      var off=Math.floor(rng()*RD_NV.length);
+      ns.forEach(function(nw,k){pushL(rdNLine(nw,off+k),null);});
+      ns=[];
+    }
+  });
+  /* 남은 단어가 있으면 마지막에 덧붙임 (동사·형용사는 문맥 사전에 없는 단어일 때만 여기로 옵니다) */
+  as.forEach(function(w){r=null;});
+  return {fr:fr,lines:lines,facts:facts};
+}
+var RD_AV=[["とても","とても","아주"],["本当に","ほんとうに","정말"],["かなり","かなり","꽤"]];
+var RD_CN=[["それから、","それから、","그리고 나서 "],["そのあと、","そのあと、","그 뒤에 "],["そして、","そして、","그리고 "]];
+function rdStory(P,rng){
+  var L=P.lines,fr=P.fr,pick=[],k;
+  function has(l){return pick.indexOf(l)>=0;}
+  var V=L.filter(function(l){return l.k==="v";}),A=L.filter(function(l){return l.k==="a";}),
+      Pl=L.filter(function(l){return l.k==="p";}),N=L.filter(function(l){return l.k==="n";});
+  var out=[];
+  if(fr.id==="talk"){
+    /* 질문-대답 3쌍 */
+    var pairs=[],i;
+    for(i=0;i<L.length-1;i++){
+      if(L[i].k==="f"&&L[i].who!==undefined){}
+    }
+    var ans=V.concat(A,Pl).slice();
+    var want=[];
+    ["v","a","p"].forEach(function(t){var c=L.filter(function(l){return l.k===t;})[0];if(c)want.push(c);});
+    if(want.length<3&&V[1])want.splice(1,0,V[1]);
+    want=want.sort(function(x,y){return L.indexOf(x)-L.indexOf(y);});
+    want.forEach(function(l){
+      var ix=L.indexOf(l),q=null,j;
+      for(j=ix-1;j>=0;j--){if(L[j].k==="f"&&/^田中/.test(L[j][0])){q=L[j];break;}if(L[j].k!=="f")break;}
+      if(l.adj){l=rdAdv(l,rng);}
+      if(q&&out.indexOf(q)<0)out.push(q);
+      out.push(l);
+    });
+    return out;
+  }
+  var pl=Pl[0]||null,a1=A.length?[A[0]]:[],take=[];
+  var nV=Math.min(V.length,pl?3:4);
+  if(nV<3&&A.length>1)a1=A.slice(0,2);
+  take=V.slice(0,nV).concat(a1);
+  if(pl)take.push(pl);
+  if(take.length<5&&N.length)take.push(N[0]);
+  take=take.slice(0,5).sort(function(x,y){return L.indexOf(x)-L.indexOf(y);});
+  var ci=Math.floor(rng()*3),first=true;
+  take.forEach(function(l){
+    var m=l;
+    if(l.adj)m=rdAdv(l,rng);
+    else if(l.k==="p")m=rdPlanAdv(l);
+    if(!first&&(l.k==="v"||l.k==="p")&&!/^(それから|そのあと|そして|また)/.test(m[0])){
+      var seq=(fr.id==="diary"||fr.id==="weekend")&&l.k==="v",c=seq?RD_CN[ci++%3]:(l.k==="p"?RD_CN[2]:["また、","また、","또 "]);
+      m=[c[0]+m[0],c[1]+m[1],c[2]+m[2]];m.k=l.k;}
+    first=false;out.push(m);
+  });
+  return out;
+}
+function rdAdv(l,rng){
+  var r=l.adj,ad=RD_AV[Math.floor(rng()*RD_AV.length)];
+  var m=[r.pre+ad[0]+r.aj+"。",r.prek+ad[1]+r.ak+"。",rdJoinKo(r.subj,ad[2],r.ans)+"."];
+  m.k="a";
+  if(l[0].indexOf("田中")===0||l[0].indexOf("私：")===0){var sp=l[0].indexOf("田中")===0?RD_SP.t:RD_SP.w;m=[sp[0]+m[0],sp[1]+m[1],sp[2]+m[2]];}
+  return m;
+}
+function rdPlanAdv(l){
+  var ts=[RD_T.tmr,RD_T.wk,RD_T.nw],i,t;
+  for(i=0;i<ts.length;i++){t=ts[i];
+    if(l[0].indexOf(t[0])===0){var m=[t[0]+"ぜひ"+l[0].slice(t[0].length),t[1]+"ぜひ"+l[1].slice(t[1].length),t[2]+" 꼭"+l[2].slice(t[2].length)];m.k="p";return m;}}
+  return l;
+}
+function rdVPhrase(jp){          /* 오답 보기용: 사전에 있는 동사의 과거 구절(한국어) */
+  var e=RDV[jp];if(!e||/[xk]/.test(e[3]||""))return "";
+  var ws=allWords(),i,w=null;
+  for(i=0;i<ws.length;i++)if(ws[i].jp===jp){w=ws[i];break;}
+  if(!w)return "";
+  var kc=koConj(e[4]||rdPlain(w),"v");if(!kc)return "";
+  return koFixI(rdJoinKo(e[2],kc.past));
+}
+function rdQuizOf(P,words,rng,lines){
+  var quiz=[],idx=words.map(function(_,x){return x;}),order=rdShuf(idx,rng),q,i;
+  function meaning(ix){
+    var others=rdShuf(idx.filter(function(x){return x!==ix&&words[x][2]!==words[ix][2];}),rng).slice(0,3);
+    var mm=rdShuf([ix].concat(others),rng);
+    return {q:"「"+words[ix][0]+"」の意味は？",opts:mm.map(function(x){return words[x][2];}),a:mm.indexOf(ix),
+            w:words[ix][0]+" = "+words[ix][2]};
+  }
+  function fact(f){
+    var pool=P.facts.filter(function(g){return g!==f&&g.ans!==f.ans;}).map(function(g){return g.ans;});
+    var more=rdShuf(Object.keys(RDV),rng),k;
+    for(k=0;k<more.length&&pool.length<6;k++){var ph=rdVPhrase(more[k]);if(ph&&ph!==f.ans&&pool.indexOf(ph)<0)pool.push(ph);}
+    var d=rdShuf(pool,rng).slice(0,3),opts=rdShuf([f.ans].concat(d),rng);
+    return {q:f.time[0]+"何をしましたか。",opts:opts,a:opts.indexOf(f.ans),w:f.jp+" — "+f.ko};
+  }
+  function sentence(){
+    var cand=lines.filter(function(l,k){return k>0&&l[2];});
+    if(cand.length<4)return null;
+    var pick=cand[Math.floor(rng()*cand.length)],oth=rdShuf(cand.filter(function(l){return l!==pick&&l[0]!==pick[0];}),rng).slice(0,3);
+    var opts=rdShuf([pick].concat(oth),rng);
+    return {q:"다음 뜻에 맞는 문장은? "+pick[2],opts:opts.map(function(l){return l[0];}),a:opts.indexOf(pick),w:pick[0]+" — "+pick[2]};
+  }
+  var fs=rdShuf(P.facts,rng);
+  if(fs.length)quiz.push(fact(fs[0]));
+  quiz.push(meaning(order[0]));
+  var s1=sentence();if(s1)quiz.push(s1);
+  if(fs.length>1)quiz.push(fact(fs[1]));
+  quiz.push(meaning(order[1%order.length]));
+  if(quiz.length<5&&order.length>2)quiz.push(meaning(order[2]));
+  return quiz;
+}
+/* ===== 읽기 v3: 오늘 단어 10개 + YBM 문법 총동원 10문장 ===== */
+var RD_ADVN={neg:[["あまり","あまり","별로"],["全然","ぜんぜん","전혀"]],pos:[["とても","とても","아주"],["本当に","ほんとうに","정말"],["かなり","かなり","꽤"]]};
+function rdPick(a,rng){return a[Math.floor(rng()*a.length)];}
+function rdBat(m){var c=m.charAt(m.length-1),cc=c.charCodeAt(0);if(cc>=0xAC00&&cc<=0xD7A3)return (cc-0xAC00)%28!==0;if(/[0-9]/.test(c))return "0136780".indexOf(c)>=0;return false;}
+function koEo(st){var ps=koPastStem(st,"v"),d=koDec(ps.slice(-1));if(d&&d.jong===20)return ps.slice(0,-1)+koCom({cho:d.cho,jung:d.jung,jong:0});return ps;}
+function koAdnL(st){var d=koDec(st.slice(-1));if(!d)return st+"을";if(d.jong===0)return st.slice(0,-1)+koCom({cho:d.cho,jung:d.jung,jong:8});if(d.jong===8)return st;return st+"을";}
+function koNeun(st){var d=koDec(st.slice(-1));if(d&&d.jong===8)return st.slice(0,-1)+koCom({cho:d.cho,jung:d.jung,jong:0})+"는";return st+"는";}
+function koBsida(st){var d=koDec(st.slice(-1));if(!d)return st+"읍시다";if(d.jong===0)return st.slice(0,-1)+koCom({cho:d.cho,jung:d.jung,jong:17})+"시다";if(d.jong===8)return st.slice(0,-1)+koCom({cho:d.cho,jung:d.jung,jong:17})+"시다";return st+"읍시다";}
+var RD_NOVOL={"別れる":1};
+function rdVP(w){
+  var e=RDV[w.jp];if(!e)return null;
+  var kv=e[4]||rdPlain(w),kc=koConj(kv,"v");if(!kc)return null;
+  var st=koSplit(kv);st=st.slice(0,-1);
+  return {w:w,e:e,fl:e[3]||"",kc:kc,st:st,reg:!/[걷듣묻싣돕곱굽눕짓낫붓잇]$/.test(st)&&!RD_NOVOL[w.jp]&&st.length>0};
+}
+function rdT3(jp,ka,ko,g){var a=[jp,ka,ko];a[3]=g;return a;}
+/* 동사 한 문장 (grammar 종류별) — vp.fl==="" 인 규칙 동사만 */
+function rdVG(kind,vp,tm,rng){
+  var e=vp.e,kc=vp.kc,st=vp.st,w=vp.w,o=e[2],f=function(s){return koFixI(s);},ad,j;
+  var T0=tm?tm[0]:"",T1=tm?tm[1]:"",T2=tm?tm[2]:"";
+  switch(kind){
+    case "past": j=conjugate(w.jp,w.kana,"mashita");
+      return rdT3(T0+e[0]+j.jp+"。",T1+e[1]+j.kana+"。",f(rdJoinKo(T2,o,kc.past))+".","〜ました (과거)");
+    case "neg": j=conjugate(w.jp,w.kana,"masendeshita");ad=rdPick(RD_ADVN.neg,rng);
+      return rdT3(T0+e[0]+ad[0]+j.jp+"。",T1+e[1]+ad[1]+j.kana+"。",f(rdJoinKo(T2,o,ad[2],kc.pastNeg))+".","〜ませんでした (과거부정) + "+ad[0]);
+    case "done": j=conjugate(w.jp,w.kana,"mashita");
+      return rdT3(T0+"もう"+e[0]+j.jp+"。",T1+"もう"+e[1]+j.kana+"。",f(rdJoinKo(T2,"벌써",o,kc.past))+".","もう〜ました (이미)");
+    case "notyet": j=conjugate(w.jp,w.kana,"te");
+      return rdT3("まだ"+e[0]+j.jp+"いません。","まだ"+e[1]+j.kana+"いません。",f(rdJoinKo("아직",o,kc.pastNeg))+".","まだ〜ていません (아직 ~않았다)");
+    case "temo": j=conjugate(w.jp,w.kana,"te");
+      return rdT3("友だちに「"+e[0]+j.jp+"もいいですか」と聞きました。","ともだちに「"+e[1]+j.kana+"もいいですか」ときぎました。",f('친구에게 "'+rdJoinKo(o,koEo(st)+"도 됩니까?")+'"라고 물었습니다.'),"〜てもいいですか");
+    case "kudasai": j=conjugate(w.jp,w.kana,"te");
+      return rdT3("先生に「"+e[0]+j.jp+"ください」とお願いしました。","せんせいに「"+e[1]+j.kana+"ください」とおねがいしました。",f('선생님께 "'+rdJoinKo(o,koEo(st)+" 주세요")+'"라고 부탁했습니다.'),"〜てください");
+    case "naide": j=conjugate(w.jp,w.kana,"nai");
+      return rdT3("母は「"+e[0]+j.jp+"でください」と言いました。","ははは「"+e[1]+j.kana+"でください」といいました。",f('어머니는 "'+rdJoinKo(o,st+"지 마세요")+'"라고 말했습니다.'),"〜ないでください");
+    case "masenka": j=conjugate(w.jp,w.kana,"masen");
+      return rdT3("友だちを「"+e[0]+j.jp+"か」と誘いました。","ともだちを「"+e[1]+j.kana+"か」とさそいました。",f('친구에게 "'+rdJoinKo(o,st+"지 않겠습니까?")+'"라고 권했습니다.'),"〜ませんか (권유)");
+    case "tsumori": j=conjugate(w.jp,w.kana,"jisho");
+      return rdT3(T0+"ぜひ"+e[0]+j.jp+"つもりです。",T1+"ぜひ"+e[1]+j.kana+"つもりです。",f(rdJoinKo(T2,"꼭",o,koAdnL(st)+" 생각입니다"))+".","〜つもりです + ぜひ");
+    case "tai": j=conjugate(w.jp,w.kana,"tai");
+      return rdT3(T0+"ぜひ"+e[0]+j.jp+"。",T1+"ぜひ"+e[1]+j.kana+"。",f(rdJoinKo(T2,"꼭",o,kc.te+" 싶습니다"))+".","〜たいです + ぜひ");
+    case "koto": j=conjugate(w.jp,w.kana,"koto");
+      return rdT3(T0+e[0]+j.jp+"。",T1+e[1]+j.kana+"。",f(rdJoinKo(T2,o,koAdnL(st)+" 수 있습니다"))+".","〜ことができます (가능)");
+    case "mashou": j=conjugate(w.jp,w.kana,"istem");
+      return rdT3(T0+"みんなで"+e[0]+j.jp+"ましょう。",T1+"みんなで"+e[1]+j.kana+"ましょう。",f(rdJoinKo(T2,"다 같이",o,koBsida(st)))+".","〜ましょう (권유)");
+    case "hou": j=conjugate(w.jp,w.kana,"ta");
+      return rdT3(T0+e[0]+j.jp+"ほうがいいと思います。",T1+e[1]+j.kana+"ほうがいいとおもいます。",f(rdJoinKo(T2,o,koNeun(st)+" 편이 좋다고 생각합니다"))+".","〜たほうがいい + 〜と思います");
+  }
+  return null;
+}
+/* 동사 두 개 연결 */
+function rdVC(kind,a,b,tm){
+  var e1=a.e,e2=b.e,j1,j2,T0=tm[0],T1=tm[1],T2=tm[2],f=function(s){return koFixI(s);};
+  if(kind==="te"){j1=conjugate(a.w.jp,a.w.kana,"te");j2=conjugate(b.w.jp,b.w.kana,"mashita");
+    return rdT3(T0+e1[0]+j1.jp+"、"+e2[0]+j2.jp+"。",T1+e1[1]+j1.kana+"、"+e2[1]+j2.kana+"。",f(rdJoinKo(T2,e1[2],a.kc.te+",",e2[2],b.kc.past))+".","〜て、〜ました (て형 연결)");}
+  if(kind==="kara"){j1=conjugate(a.w.jp,a.w.kana,"te");j2=conjugate(b.w.jp,b.w.kana,"mashita");
+    return rdT3(T0+e1[0]+j1.jp+"から、"+e2[0]+j2.jp+"。",T1+e1[1]+j1.kana+"から、"+e2[1]+j2.kana+"。",f(rdJoinKo(T2,e1[2],a.st+"고 나서,",e2[2],b.kc.past))+".","〜てから (~하고 나서)");}
+  if(kind==="mae"){j1=conjugate(a.w.jp,a.w.kana,"mashita");j2=conjugate(b.w.jp,b.w.kana,"jisho");
+    return rdT3(T0+e2[0]+j2.jp+"前に、"+e1[0]+j1.jp+"。",T1+e2[1]+j2.kana+"まえに、"+e1[1]+j1.kana+"。",f(rdJoinKo(T2,e2[2],b.st+"기 전에,",e1[2],a.kc.past))+".","〜まえに (~하기 전에)");}
+  return null;
+}
+/* 형용사 한 문장 — form: now past neg negpast */
+function rdAG(w,form,rng){
+  var p=wPos(w),b=(p==="na")?naBase(w):w,e=RDA[b.jp];if(!e)return null;
+  var kc=koConj(e[3]||rdPlain(w),"i");if(!kc)return null;
+  var f={now:"desu",past:"deshita",neg:"janai",negpast:"janakatta"}[form],ka0=b.kana||b.jp;
+  var aj=(p==="i")?ybAdjI(b.jp,f):ybNoun(b.jp,f),ak=(p==="i")?ybAdjI(ka0,f):ybNoun(ka0,f);
+  var ko=(form==="now")?kc.pres:(form==="past")?kc.past:(form==="neg")?kc.neg:kc.pastNeg;
+  var ad=(form==="neg"||form==="negpast")?rdPick(RD_ADVN.neg,rng):rdPick(RD_ADVN.pos,rng);
+  var lab={now:"い/な형용사 현재",past:"형용사 과거 (かったです/でした)",neg:"형용사 부정 (くないです/じゃないです)",negpast:"형용사 과거부정 (くなかったです)"}[form];
+  return rdT3(e[0]+ad[0]+aj+"。",e[1]+ad[1]+ak+"。",rdJoinKo(e[2],ad[2],ko)+".",lab+" + "+ad[0]);
+}
+/* 명사 — 학습 일기 문장 (어떤 명사에도 어색하지 않은 틀) */
+function rdNM(w){var m=rdPlain(w),ka=w.kana||w.jp;return {jp:"「"+w.jp+"」",ka:"「"+ka+"」",ko:"「"+w.jp+"」("+m+")",m:m,bat:rdBat(m)};}
+var RD_N1=[
+  function(n,j){return rdT3(n.jp+"を使って、短い文を作ってみました。",n.ka+"をつかって、みじかいぶんをつくってみました。",n.ko+(n.bat?"을":"를")+" 사용해서 짧은 문장을 만들어 보았습니다.","〜てみる (~해 보다)");},
+  function(n,j){return rdT3("友だちが"+n.jp+"の意味を教えてくれました。","ともだちが"+n.ka+"のいみをおしえてくれました。","친구가 "+n.ko+"의 뜻을 가르쳐 주었습니다.","〜てくれる (~해 주다)");},
+  function(n,j){return rdT3(n.jp+"という言葉は、まだ覚えていません。",n.ka+"ということばは、まだおぼえていません。",n.ko+(n.bat?"이":"")+"라는 말은 아직 외우지 못했습니다.","まだ〜ていません");},
+  function(n,j){return rdT3(n.jp+"の読み方を調べてから、文を作りました。",n.ka+"のよみかたをしらべてから、ぶんをつくりました。",n.ko+"의 읽는 법을 찾아보고 나서 문장을 만들었습니다.","〜てから");},
+  function(n,j){return rdT3(n.jp+"を覚えるのは難しくありませんでした。",n.ka+"をおぼえるのはむずかしくありませんでした。",n.ko+(n.bat?"을":"를")+" 외우는 것은 어렵지 않았습니다.","〜くありませんでした (과거부정)");},
+  function(n,j){return rdT3(n.jp+"の意味をもっと知りたいです。",n.ka+"のいみをもっとしりたいです。",n.ko+"의 뜻을 더 알고 싶습니다.","〜たいです + もっと");},
+  function(n,j){return rdT3(n.jp+"は大切な言葉だと思います。",n.ka+"はたいせつなことばだとおもいます。",n.ko+(n.bat?"은":"는")+" 중요한 말이라고 생각합니다.","〜と思います");}
+];
+var RD_N2=[
+  function(a,b){return rdT3(a.jp+"と"+b.jp+"を一緒に覚えました。",a.ka+"と"+b.ka+"をいっしょにおぼえました。",a.ko+(a.bat?"과":"와")+" "+b.ko+(b.bat?"을":"를")+" 함께 외웠습니다.","〜と (와/과) + 〜ました");},
+  function(a,b){return rdT3(a.jp+"も"+b.jp+"も、ノートに書きました。",a.ka+"も"+b.ka+"も、ノートにかきました。",a.ko+"도 "+b.ko+"도 노트에 적었습니다.","〜も〜も (~도 ~도)");},
+  function(a,b){return rdT3(a.jp+"と"+b.jp+"の意味を調べてみました。",a.ka+"と"+b.ka+"のいみをしらべてみました。",a.ko+(a.bat?"과":"와")+" "+b.ko+"의 뜻을 찾아보았습니다.","〜てみる");}
+];
+function rdBuild3(ws,rng,dt,dayNo){
+  var vs=[],as=[],ad=[],ns=[],fx=[];
+  ws.forEach(function(w){
+    var p=wPos(w),b=(p==="na")?naBase(w):w;
+    if(RDV[w.jp]){var vp=rdVP(w);if(vp)vs.push(vp);else ns.push(w);}
+    else if((p==="i"||p==="na")&&RDA[b.jp])as.push(w);
+    else if(RDADV[w.jp])ad.push(w);
+    else ns.push(w);
+  });
+  var lines=[],facts=[],i;
+  function add(l,k){l.k=k;lines.push(l);}
+  function vl(vp,kind,tm,alt){      /* 불규칙 동사(특수)는 기존 문장 */
+    var r=rdVLine(vp.w,{kind:kind,time:tm,alt:alt},rng);if(!r)return;
+    var l=rdT3(r.l[0],r.l[1],r.l[2],vp.fl==="x"?"일상 표현":(/n/.test(vp.fl)?"〜ました (과거)":/k/.test(vp.fl)?"〜ています (상태)":/f/.test(vp.fl)?"〜たいです / 〜ます (미래)":"〜ました (과거)"));
+    add(l,"v");
+    if(r.kind==="past"&&r.ans&&r.time)facts.push({time:r.time,ans:r.ans,jp:l[0],ko:l[2]});
+  }
+  var reg=vs.filter(function(v){return v.fl==="";}),spec=vs.filter(function(v){return v.fl!=="";});
+  var specM=spec.filter(function(v){return /m/.test(v.fl);}),specE=spec.filter(function(v){return /e/.test(v.fl)&&!/m/.test(v.fl);}),
+      specO=spec.filter(function(v){return !/[me]/.test(v.fl);});
+  var Ad=rdShuf(as,rng),forms=rdShuf(["now","past","neg","negpast"],rng),ai=0;
+  function nextA(){var w=Ad[ai];if(!w)return;var fm=forms[ai%forms.length];ai++;var l=rdAG(w,fm,rng);if(l)add(l,"a");}
+  /* 1 · 아침 동사 */
+  specM.forEach(function(v){vl(v,"past",RD_T.am,RD_T.yd);});
+  var v1=reg.length?reg.shift():null;
+  if(v1){
+    var k1=rdPick(["past","past","neg","done"],rng),l1=rdVG(k1,v1,RD_T.am,rng);
+    if(l1){add(l1,"v");if(k1==="past"||k1==="done")facts.push({time:RD_T.am,ans:koFixI(rdJoinKo(v1.e[2],v1.kc.past)),jp:l1[0],ko:l1[2]});}
+  }
+  nextA();
+  /* 2 · 동사 연결 */
+  var pairKind=rdPick(["te","kara","mae"],rng),va=null,vb=null;
+  if(reg.length>=2){va=reg.shift();vb=reg.shift();}
+  else if(reg.length===1&&v1){va=reg.shift();vb=v1;}
+  if(va&&vb){var lc=rdVC(pairKind,va,vb,RD_T.pm);if(lc){add(lc,"v");}}
+  else if(va){var lp=rdVG("past",va,RD_T.pm,rng);add(lp,"v");facts.push({time:RD_T.pm,ans:koFixI(rdJoinKo(va.e[2],va.kc.past)),jp:lp[0],ko:lp[2]});}
+  specO.forEach(function(v){vl(v,"past",RD_T.yd,RD_T.yd);});
+  /* 3 · 명사 1개 */
+  var nn=ns.slice(),nm=function(w){return rdNM(w);};
+  var off=Math.floor(rng()*RD_N1.length);
+  if(nn.length){var n1=nn.shift();add(RD_N1[off%RD_N1.length](nm(n1)),"n");}
+  nextA();
+  specE.forEach(function(v){vl(v,"past",RD_T.ni,RD_T.yd);});
+  /* 4 · 말하기/권유/부탁 문법 */
+  var sp=null,pool=[v1].concat(reg.length?[]:[],va?[va]:[],vb?[vb]:[]).filter(function(v){return v&&v.reg&&v.fl==="";});
+  if(pool.length){
+    sp=pool[Math.floor(rng()*pool.length)];
+    var sk=rdPick(["temo","kudasai","naide","masenka"],rng),ls=rdVG(sk,sp,null,rng);if(ls)add(ls,"s");
+  }
+  nextA();
+  /* 5 · 명사 2~3개 */
+  if(nn.length>=2){var a2=nn.shift(),b2=nn.shift();add(RD_N2[Math.floor(rng()*RD_N2.length)](nm(a2),nm(b2)),"n");}
+  else if(nn.length===1){add(RD_N1[(off+3)%RD_N1.length](nm(nn.shift())),"n");}
+  while(nn.length)add(RD_N1[(off+nn.length)%RD_N1.length](nm(nn.shift())),"n");
+  nextA();
+  while(ai<Ad.length)nextA();
+  ad.forEach(function(w){add(rdT3(RDADV[w.jp][0],RDADV[w.jp][1],RDADV[w.jp][2],"부사"),"a");});
+  /* 6 · 내일 계획 (규칙 동사 중 하나) */
+  var cands=[v1,va,vb].filter(function(v){return v&&v.reg&&v.fl==="";});
+  var planV=cands.length?cands[Math.floor(rng()*cands.length)]:null;
+  if(planV){
+    var pk=rdPick(["tsumori","tai","koto","mashou","hou"],rng),pt=RD_T.tmr;
+    var lpn=rdVG(pk,planV,pt,rng);if(lpn)add(lpn,"p");
+  }else{add(rdT3("明日もがんばります。","あしたもがんばります。","내일도 힘내겠습니다.","〜ます (미래)"),"p");}
+  var wd=["일","월","화","수","목","금","토"][dt.getDay()];
+  var gram=[],seen={};
+  lines.forEach(function(l){var g=l[3]||"";g.split(" + ")[0].split(" (")[0];var key=g.split(" + ")[0];if(key&&!seen[key]){seen[key]=1;gram.push(key.replace(/ \(.*\)$/,""));}});
+  return {lines:lines,facts:facts,gram:gram,title:"오늘의 일기 · "+(dt.getMonth()+1)+"월 "+dt.getDate()+"일 ("+wd+")"};
+}
+
 function rdGenToday(){
   ensureChallenge();
   var ws=chWords();
   if(!ws||ws.length<2)return null;
-  var id="gen-"+todayStr()+"-"+rdHash((S.ch.ids||[]).join(","));
+  var id="gen3-"+todayStr()+"-"+rdHash((S.ch.ids||[]).join(",")),dt=dParse(todayStr());
   if(S._rdg&&S._rdg.id===id)return S._rdg;
-  var lines=[["今日は新しい言葉で文を作ります。","きょうはあたらしいことばでぶんをつくります。","오늘은 새 단어로 문장을 만들어 봅니다."]],
-      words=[],i,rng=rdRng(rdHash(id));
-  for(i=0;i<ws.length;i++){
-    var ln;
-    try{ln=rdGenLine(ws[i],i);}catch(e){ln=[ws[i].jp+"。",(ws[i].kana||ws[i].jp)+"。",koSplit(ws[i].ko||"")+"."];}
-    lines.push(ln);
-    words.push([ws[i].jp,ws[i].kana||ws[i].jp,koSplit(ws[i].ko||"")||(ws[i].ko||"")]);
-  }
-  var order=rdShuf(words.map(function(_,x){return x;}),rng),quiz=[],n=Math.min(4,order.length),qi;
-  for(qi=0;qi<n;qi++){
-    var ix=order[qi],opts,ans,q;
-    if(qi%2===0){
-      var others=rdShuf(words.map(function(_,x){return x;}).filter(function(x){return x!==ix&&words[x][2]!==words[ix][2];}),rng).slice(0,3);
-      var mm=rdShuf([ix].concat(others),rng);
-      opts=mm.map(function(x){return words[x][2];});ans=mm.indexOf(ix);
-      q={q:"「"+words[ix][0]+"」の意味は？",opts:opts,a:ans,w:words[ix][0]+" = "+words[ix][2]+" · "+lines[ix+1][0]+" ("+lines[ix+1][2]+")"};
-    }else{
-      var oth=rdShuf(words.map(function(_,x){return x;}).filter(function(x){return x!==ix;}),rng).slice(0,3);
-      var mm2=rdShuf([ix].concat(oth),rng);
-      q={q:"다음 뜻에 맞는 문장은? "+lines[ix+1][2],opts:mm2.map(function(x){return lines[x+1][0];}),a:mm2.indexOf(ix),
-         w:lines[ix+1][0]+" — "+lines[ix+1][2]};
-    }
-    quiz.push(q);
-  }
-  S._rdg={id:id,gen:true,t:"오늘의 단어 읽기",sub:"오늘 단어 "+ws.length+"개로 만든 작문",lv:"0",
-          gram:["ます·た·たい·て","형용사 활용","명사 문형"],lines:lines,words:words,quiz:quiz};
+  var rng=rdRng(rdHash(id)),dayNo=Math.floor(dt.getTime()/86400000);
+  var P=rdBuild3(ws,rng,dt,dayNo);P.fr={t:P.title,sub:"오늘 단어 10개 + YBM 문법",gram:P.gram};
+  var words=ws.map(function(w){return [w.jp,w.kana||w.jp,rdPlain(w)];});
+  P.lines.forEach(function(l){sayReg(l[0],l[1]);});
+  var quiz=rdQuizOf(P,words,rng,P.lines);
+  (function(){var gl=P.lines.filter(function(l){return l[3]&&l.k!=="a"||l[3]&&l.k==="a";}),labs=[];
+    P.lines.forEach(function(l){var k=(l[3]||"").split(" + ")[0].split(" (")[0];if(k&&labs.indexOf(k)<0)labs.push(k);});
+    if(labs.length<4)return;
+    var pk=P.lines.filter(function(l){return l[3]&&l.k!=="n";});if(!pk.length)return;
+    var L=pk[Math.floor(rng()*pk.length)],key=(L[3]||"").split(" + ")[0].split(" (")[0];
+    var opts=rdShuf([key].concat(rdShuf(labs.filter(function(x){return x!==key;}),rng).slice(0,3)),rng);
+    quiz.push({q:"「"+L[0]+"」— 이 문장에 쓰인 문법은?",opts:opts,a:opts.indexOf(key),w:L[0]+" — "+L[3]});
+  })();
+  S._rdg={id:id,gen:true,t:P.fr.t,sub:P.fr.sub,lv:"0",gram:P.fr.gram,lines:P.lines,words:words,quiz:quiz};
   return S._rdg;
 }
 function rdSync(){
@@ -6607,6 +7359,53 @@ function rdKana(t){
   var f=furiRead(t);
   if(!f||f===t||KANJI.test(f))return "";
   return f;
+}
+/* ===== 읽기 전체 듣기 — 한 줄씩 차례로, 반복 횟수 지정, 중간에 끊기지 않게 ===== */
+function rdStop(){S.rdTok++;S.rdPlaying=false;stopSay();rdMark(-1);}
+function rdMark(ix){
+  try{var els=document.querySelectorAll(".rdline");
+    for(var k=0;k<els.length;k++)els[k].style.background=(k===ix)?"rgba(126,217,166,.14)":"";
+    if(ix>=0&&els[ix]&&els[ix].scrollIntoView){var r=els[ix].getBoundingClientRect();if(r.top<60||r.bottom>window.innerHeight-60)els[ix].scrollIntoView({block:"center",behavior:"smooth"});}
+  }catch(e){}
+}
+function rdSayLine(i){
+  var R=READS[S.rdIdx];if(!R||!R.lines[i])return;
+  var tok=++S.rdTok,idx=S.rdIdx,n=S.rdLRep||1,L=R.lines[i];
+  S.rdPlaying=false;stopSay();
+  (async function(){
+    for(var q=1;q<=n&&tok===S.rdTok&&S.rdIdx===idx;q++){
+      rdMark(i);
+      await say(sayText(L[0],L[1]).replace(/^(田中|私)[：:]/,""),S.dRate||0.85);
+      if(tok===S.rdTok&&q<n)await rdWait(700);
+    }
+    if(tok===S.rdTok)rdMark(-1);
+  })();
+}
+function rdWait(ms){return new Promise(function(r){setTimeout(r,ms);});}
+function rdPlayAll(){
+  var R=READS[S.rdIdx];if(!R)return;
+  var tok=++S.rdTok,idx=S.rdIdx,rep=S.rdRep||1,lrep=S.rdLRep||1;
+  S.rdPlaying=true;render();
+  (async function(){
+    var pass,i,st;
+    for(pass=1;pass<=rep&&tok===S.rdTok&&S.rdIdx===idx;pass++){
+      for(i=0;i<R.lines.length&&tok===S.rdTok&&S.rdIdx===idx;i++){
+        rdMark(i);
+        st=document.getElementById("rdstat");
+        if(st)st.textContent=pass+" / "+rep+"회 · "+(i+1)+" / "+R.lines.length+"문장";
+        var L=R.lines[i];
+        for(var q=1;q<=lrep&&tok===S.rdTok;q++){
+          if(st)st.textContent=pass+" / "+rep+"회 · "+(i+1)+" / "+R.lines.length+"문장 · 문장 "+q+" / "+lrep+"번";
+          await say(sayText(L[0],L[1]).replace(/^(田中|私)[：:]/,""),S.dRate||0.85);
+          if(tok===S.rdTok)await rdWait(q<lrep?700:500);
+        }
+        if(tok!==S.rdTok)break;
+      }
+      if(pass<rep&&tok===S.rdTok)await rdWait(1000);
+    }
+    if(tok===S.rdTok){S.rdPlaying=false;rdMark(-1);render();
+      var st2=document.getElementById("rdstat");if(st2)st2.textContent="재생이 끝났습니다.";}
+  })();
 }
 function viewRead(){
   var h="",i,j;
@@ -6648,14 +7447,20 @@ function viewRead(){
      '<button class="chip sm" data-on="'+(S.rdKana?1:0)+'" data-a="rdkana">'+(S.rdKana?"읽기 켬":"읽기 끔")+'</button>'+
      '<button class="chip sm" data-on="'+(S.rdKo?1:0)+'" data-a="rdko">'+(S.rdKo?"해석 켬":"해석 끔")+'</button>'+
      '<button class="chip sm" data-on="'+(S.rdKp?1:0)+'" data-a="rdkp">'+(S.rdKp?"한글 발음 켬":"한글 발음 끔")+'</button>'+
-     '<button class="chip sm" data-a="say" data-v="'+esc(R.lines.map(function(l){return l[1];}).join(""))+'">전체 듣기</button></div>';
+     '<button class="chip sm" data-on="'+(S.rdPlaying?1:0)+'" data-a="rdplay">'+(S.rdPlaying?"■ 멈추기":"▶ 전체 듣기")+'</button>'+
+     '<span class="set" style="display:inline-flex;margin:0 0 0 4px"><span>문장마다<select data-a="rdlrep">'+
+     [1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option value="'+n+'"'+(S.rdLRep===n?" selected":"")+'>'+n+'회</option>';}).join("")+
+     '</select></span><span>전체<select data-a="rdrep">'+
+     [1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option value="'+n+'"'+(S.rdRep===n?" selected":"")+'>'+n+'회</option>';}).join("")+
+     '</select></span></span></div>'+
+     '<div id="rdstat" class="pmini" style="margin:-2px 0 8px;min-height:20px">'+(S.rdPlaying?"재생 중…":"문장을 한 줄씩 차례로 읽어 줍니다. 반복 횟수를 정할 수 있어요.")+'</div>';
   for(i=0;i<R.lines.length;i++){
     var L=R.lines[i];
     h+='<div class="rdline">'+
        (S.rdKana?'<div class="rk">'+esc(L[1])+'</div>':"")+
-       '<div class="rj">'+esc(L[0])+' <button class="link" data-a="say" data-v="'+esc(sayText(L[0],L[1]))+'">▶</button></div>'+
+       '<div class="rj">'+esc(L[0])+' <button class="link" data-a="rdsay" data-v="'+i+'">▶</button></div>'+
        (S.rdKp&&koPronPair(L[0],L[1])?'<div class="skp" style="margin:2px 0 1px">'+esc(koPronPair(L[0],L[1]))+'</div>':"")+
-       (S.rdKo?'<div class="rm">'+esc(L[2])+'</div>':"")+'</div>';
+       (S.rdKo?'<div class="rm">'+esc(L[2])+'</div>':"")+(L[3]?'<div style="font-size:17px;color:#7ED9A6;margin-top:3px">문법 · '+esc(L[3])+'</div>':"")+'</div>';
   }
   h+='</div>';
 
@@ -6727,7 +7532,7 @@ function viewHome(){
      '<div class="todo'+(ds.drill>=10?" ok":"")+'">'+
        '<span class="n">2</span>'+
        '<span class="t"><b>문법 · 변형 훈련</b>'+
-         '<i>'+(ds.drill?'오늘 '+ds.drill+'문제 풀었습니다'+(ds.drill>=10?" — 충분해요":" — 10문제를 목표로"):'아직 시작 전 — 오늘 단어 10개로 10문제')+'</i>'+
+         '<i>'+(ds.drill?'오늘 '+ds.drill+'문제 풀었습니다'+(ds.drill>=10?" — 충분해요":" — 10문제를 목표로"):'아직 시작 전 — 단어마다 て형·た형·ます형·부정·과거를 한 번씩')+'</i>'+
          '<span class="mini"><span class="mb"><em style="width:'+Math.min(100,ds.drill/10*100)+'%"></em></span>'+Math.min(ds.drill,10)+' / 10</span>'+
        '</span>'+
        '<button class="btn sm" data-a="goto" data-v="yb:chain">연습</button>'+
@@ -6965,6 +7770,7 @@ document.addEventListener("click",function(ev){
     chBuild(S.piQ.word,S.piQ.type);S.cPosShow=false;window.scrollTo(0,0);render();return;}
   if(a==="caskpos"){S.cAskPos=!S.cAskPos;S.cPosPicked=null;S.cPosShow=false;render();return;}
   if(a==="cqmode"){S.cQMode=(S.cQMode==="ko")?"form":"ko";S.cHint=false;render();return;}
+  if(a==="cper"){S.cPer=S.cPer?0:1;S.cIdx=0;chBuild();S.cPosShow=false;S.cHint=false;render();return;}
   if(a==="cshuffle"){S.cShuffle=!S.cShuffle;chBuild();S.cPosShow=false;render();return;}
   if(a==="chint"){S.cHint=true;render();return;}
   if(a==="cpos"){
@@ -7060,11 +7866,15 @@ document.addEventListener("click",function(ev){
     if(gt==="gram"){S.gc=false;S.gGrp=null;}
     if(gt==="talk"&&gs){S.tSub=gs;S.rdIdx=null;}
     window.scrollTo(0,0);render();return;}
-  if(a==="rdopen"){S.rdIdx=parseInt(v,10);S.rdKana=false;S.rdKo=false;window.scrollTo(0,0);render();return;}
-  if(a==="rdclose"){S.rdIdx=null;window.scrollTo(0,0);render();return;}
+  if(a==="rdopen"){rdStop();S.rdIdx=parseInt(v,10);S.rdKana=false;S.rdKo=false;window.scrollTo(0,0);render();return;}
+  if(a==="rdclose"){rdStop();S.rdIdx=null;window.scrollTo(0,0);render();return;}
   if(a==="rdall"){S.rdAll=!S.rdAll;render();return;}
   if(a==="rdtoday"){S.tab="talk";S.tSub="read";S.rdIdx=rdTodayIdx();S.rdKana=false;S.rdKo=false;window.scrollTo(0,0);render();return;}
   if(a==="rdkana"){S.rdKana=!S.rdKana;render();return;}
+  if(a==="rdsay"){rdSayLine(parseInt(v,10));return;}
+  if(a==="rdplay"){
+    if(S.rdPlaying){rdStop();render();return;}
+    rdPlayAll();return;}
   if(a==="rdko"){S.rdKo=!S.rdKo;render();return;}
   if(a==="rdkp"){S.rdKp=!S.rdKp;render();return;}
   if(a==="rdreset"){
@@ -7318,6 +8128,8 @@ document.addEventListener("click",function(ev){
 
 document.addEventListener("change",function(ev){
   var el=ev.target;
+  if(el.getAttribute&&el.getAttribute("data-a")==="rdlrep"){S.rdLRep=parseInt(el.value,10)||1;LS.set("jp.rdlrep",S.rdLRep);return;}
+  if(el.getAttribute&&el.getAttribute("data-a")==="rdrep"){S.rdRep=parseInt(el.value,10)||1;LS.set("jp.rdrep",S.rdRep);return;}
   if(!el.getAttribute||el.getAttribute("data-a")!=="dset")return;
   var k=el.getAttribute("data-k"),val=parseFloat(el.value);
   if(k==="wait")S.dWait=val; else if(k==="reps")S.dReps=val; else S.dRate=val;
@@ -7429,7 +8241,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/13-B (듣기 반복 2종)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
