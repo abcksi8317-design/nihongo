@@ -1051,7 +1051,10 @@ function say(text,rate){
     try{
       if(!voiceJa)loadVoices();
       var chunks=splitJa(text),i=0,done=false;
-      function fin(){if(!done){done=true;res();}}
+      var kaT=null,rt=rate||0.85;
+      function fin(){if(!done){done=true;if(kaT)clearInterval(kaT);res();}}
+      /* 크롬은 말이 길어지면 소리가 멈춘 채 대기하는 문제가 있어 주기적으로 깨웁니다 */
+      kaT=setInterval(function(){try{var ss=window.speechSynthesis;if(ss.paused)ss.resume();else if(ss.speaking){ss.pause();ss.resume();}}catch(e5){}},9000);
       function next(){
         if(i>=chunks.length){fin();return;}
         var u=new SpeechSynthesisUtterance(chunks[i++]);
@@ -1065,7 +1068,7 @@ function say(text,rate){
       window.speechSynthesis.cancel();
       /* cancel 직후 바로 speak하면 안드로이드에서 무시되는 경우가 있다 */
       setTimeout(next,60);
-      setTimeout(fin,Math.max(3000,text.length*420));
+      setTimeout(fin,Math.max(3000,text.length*(520/Math.min(1,rt))+2500));
     }catch(e){res();}
   });
 }
@@ -2493,7 +2496,7 @@ var S={
   chQ:null, chPicked:null, chRes:null, chInput:"", chAdvance:false,
   wkRange:7, wkQuiz:null, wkQi:0, wkPicked:null, wkScore:0, wkWrong:[], chPeek:false,
   piQ:null, piPicked:null, piScore:0, piTotal:0,
-  rdIdx:null, rdRep:LS.get("jp.rdrep",1), rdLRep:LS.get("jp.rdlrep",1), rdPlaying:false, rdTok:0, rdKana:false, rdKo:false, rdKp:false, rdAll:false, rdAns:{}, rdDone:LS.get("jp.rd",{}),
+  rdIdx:null, rdRep:LS.get("jp.rdrep",1), rdLRep:LS.get("jp.rdlrep",1), rdRate:LS.get("jp.rdrate",0.8), rdPlaying:false, rdTok:0, rdKana:false, rdKo:false, rdKp:false, rdAll:false, rdAns:{}, rdDone:LS.get("jp.rd",{}),
   day:LS.get("jp.day",{date:"",drill:0,read:0,test:0}), wkLast:LS.get("jp.wk",null),
   jQ:null, jPicked:null, jScore:0, jTotal:0, jSets:[],
   recOpen:null, radIdx:null, radQuiz:false, rqQ:null, rqPicked:null, rqScore:0, rqTotal:0,
@@ -7361,7 +7364,7 @@ function rdKana(t){
   return f;
 }
 /* ===== 읽기 전체 듣기 — 한 줄씩 차례로, 반복 횟수 지정, 중간에 끊기지 않게 ===== */
-function rdStop(){S.rdTok++;S.rdPlaying=false;stopSay();rdMark(-1);}
+function rdStop(){S.rdTok++;S.rdPlaying=false;stopSay();rdMark(-1);try{keepAwake(false);}catch(e){}}
 function rdMark(ix){
   try{var els=document.querySelectorAll(".rdline");
     for(var k=0;k<els.length;k++)els[k].style.background=(k===ix)?"rgba(126,217,166,.14)":"";
@@ -7375,7 +7378,7 @@ function rdSayLine(i){
   (async function(){
     for(var q=1;q<=n&&tok===S.rdTok&&S.rdIdx===idx;q++){
       rdMark(i);
-      await say(sayText(L[0],L[1]).replace(/^(田中|私)[：:]/,""),S.dRate||0.85);
+      await say(sayText(L[0],L[1]).replace(/^(田中|私)[：:]/,""),S.rdRate||0.8);
       if(tok===S.rdTok&&q<n)await rdWait(700);
     }
     if(tok===S.rdTok)rdMark(-1);
@@ -7385,7 +7388,7 @@ function rdWait(ms){return new Promise(function(r){setTimeout(r,ms);});}
 function rdPlayAll(){
   var R=READS[S.rdIdx];if(!R)return;
   var tok=++S.rdTok,idx=S.rdIdx,rep=S.rdRep||1,lrep=S.rdLRep||1;
-  S.rdPlaying=true;render();
+  S.rdPlaying=true;try{keepAwake(true);}catch(e){}render();
   (async function(){
     var pass,i,st;
     for(pass=1;pass<=rep&&tok===S.rdTok&&S.rdIdx===idx;pass++){
@@ -7396,14 +7399,14 @@ function rdPlayAll(){
         var L=R.lines[i];
         for(var q=1;q<=lrep&&tok===S.rdTok;q++){
           if(st)st.textContent=pass+" / "+rep+"회 · "+(i+1)+" / "+R.lines.length+"문장 · 문장 "+q+" / "+lrep+"번";
-          await say(sayText(L[0],L[1]).replace(/^(田中|私)[：:]/,""),S.dRate||0.85);
+          await say(sayText(L[0],L[1]).replace(/^(田中|私)[：:]/,""),S.rdRate||0.8);
           if(tok===S.rdTok)await rdWait(q<lrep?700:500);
         }
         if(tok!==S.rdTok)break;
       }
       if(pass<rep&&tok===S.rdTok)await rdWait(1000);
     }
-    if(tok===S.rdTok){S.rdPlaying=false;rdMark(-1);render();
+    if(tok===S.rdTok){S.rdPlaying=false;rdMark(-1);try{keepAwake(false);}catch(e){}render();
       var st2=document.getElementById("rdstat");if(st2)st2.textContent="재생이 끝났습니다.";}
   })();
 }
@@ -7450,6 +7453,8 @@ function viewRead(){
      '<button class="chip sm" data-on="'+(S.rdPlaying?1:0)+'" data-a="rdplay">'+(S.rdPlaying?"■ 멈추기":"▶ 전체 듣기")+'</button>'+
      '<span class="set" style="display:inline-flex;margin:0 0 0 4px"><span>문장마다<select data-a="rdlrep">'+
      [1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option value="'+n+'"'+(S.rdLRep===n?" selected":"")+'>'+n+'회</option>';}).join("")+
+     '</select></span><span>속도<select data-a="rdrate">'+
+     [[1,"1배속"],[0.8,"0.8배속"],[0.5,"0.5배속"]].map(function(o){return '<option value="'+o[0]+'"'+(S.rdRate===o[0]?" selected":"")+'>'+o[1]+'</option>';}).join("")+
      '</select></span><span>전체<select data-a="rdrep">'+
      [1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option value="'+n+'"'+(S.rdRep===n?" selected":"")+'>'+n+'회</option>';}).join("")+
      '</select></span></span></div>'+
@@ -8128,6 +8133,7 @@ document.addEventListener("click",function(ev){
 
 document.addEventListener("change",function(ev){
   var el=ev.target;
+  if(el.getAttribute&&el.getAttribute("data-a")==="rdrate"){S.rdRate=parseFloat(el.value)||0.8;LS.set("jp.rdrate",S.rdRate);return;}
   if(el.getAttribute&&el.getAttribute("data-a")==="rdlrep"){S.rdLRep=parseInt(el.value,10)||1;LS.set("jp.rdlrep",S.rdLRep);return;}
   if(el.getAttribute&&el.getAttribute("data-a")==="rdrep"){S.rdRep=parseInt(el.value,10)||1;LS.set("jp.rdrep",S.rdRep);return;}
   if(!el.getAttribute||el.getAttribute("data-a")!=="dset")return;
@@ -8241,7 +8247,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/13-B (듣기 반복 2종)</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/15-A (듣기 속도·끊김 개선)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
