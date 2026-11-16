@@ -2496,7 +2496,7 @@ var S={
   chQ:null, chPicked:null, chRes:null, chInput:"", chAdvance:false,
   wkRange:7, wkQuiz:null, wkQi:0, wkPicked:null, wkScore:0, wkWrong:[], chPeek:false,
   piQ:null, piPicked:null, piScore:0, piTotal:0,
-  rdIdx:null, rdRep:LS.get("jp.rdrep",1), rdLRep:LS.get("jp.rdlrep",1), rdRate:LS.get("jp.rdrate",0.8), rdPlaying:false, rdTok:0, rdKana:false, rdKo:false, rdKp:false, rdAll:false, rdAns:{}, rdDone:LS.get("jp.rd",{}),
+  rdIdx:null, rdRep:LS.get("jp.rdrep",1), rdLRep:LS.get("jp.rdlrep",1), rdRate:LS.get("jp.rdrate",0.8), rdPlaying:false, rdTok:0, rdKana:true, rdKo:true, rdKp:true, rdAll:false, rdAns:{}, rdDone:LS.get("jp.rd",{}),
   day:LS.get("jp.day",{date:"",drill:0,read:0,test:0}), wkLast:LS.get("jp.wk",null),
   jQ:null, jPicked:null, jScore:0, jTotal:0, jSets:[],
   recOpen:null, radIdx:null, radQuiz:false, rqQ:null, rqPicked:null, rqScore:0, rqTotal:0,
@@ -7136,7 +7136,7 @@ function rdQuizOf(P,words,rng,lines){
             w:words[ix][0]+" = "+words[ix][2]};
   }
   function fact(f){
-    var pool=P.facts.filter(function(g){return g!==f&&g.ans!==f.ans;}).map(function(g){return g.ans;});
+    var pool=P.facts.filter(function(g){return g!==f&&g.ans!==f.ans&&g.time[0]!==f.time[0];}).map(function(g){return g.ans;});
     var more=rdShuf(Object.keys(RDV),rng),k;
     for(k=0;k<more.length&&pool.length<6;k++){var ph=rdVPhrase(more[k]);if(ph&&ph!==f.ans&&pool.indexOf(ph)<0)pool.push(ph);}
     var d=rdShuf(pool,rng).slice(0,3),opts=rdShuf([f.ans].concat(d),rng);
@@ -7196,7 +7196,7 @@ function rdVG(kind,vp,tm,rng){
     case "masenka": j=conjugate(w.jp,w.kana,"masen");
       return rdT3("友だちを「"+e[0]+j.jp+"か」と誘いました。","ともだちを「"+e[1]+j.kana+"か」とさそいました。",f('친구에게 "'+rdJoinKo(o,st+"지 않겠습니까?")+'"라고 권했습니다.'),"〜ませんか (권유)");
     case "tsumori": j=conjugate(w.jp,w.kana,"jisho");
-      return rdT3(T0+"ぜひ"+e[0]+j.jp+"つもりです。",T1+"ぜひ"+e[1]+j.kana+"つもりです。",f(rdJoinKo(T2,"꼭",o,koAdnL(st)+" 생각입니다"))+".","〜つもりです + ぜひ");
+      return rdT3(T0+e[0]+j.jp+"つもりです。",T1+e[1]+j.kana+"つもりです。",f(rdJoinKo(T2,o,koAdnL(st)+" 생각입니다"))+".","〜つもりです");
     case "tai": j=conjugate(w.jp,w.kana,"tai");
       return rdT3(T0+"ぜひ"+e[0]+j.jp+"。",T1+"ぜひ"+e[1]+j.kana+"。",f(rdJoinKo(T2,"꼭",o,kc.te+" 싶습니다"))+".","〜たいです + ぜひ");
     case "koto": j=conjugate(w.jp,w.kana,"koto");
@@ -7228,7 +7228,9 @@ function rdAG(w,form,rng){
   var ko=(form==="now")?kc.pres:(form==="past")?kc.past:(form==="neg")?kc.neg:kc.pastNeg;
   var ad=(form==="neg"||form==="negpast")?rdPick(RD_ADVN.neg,rng):rdPick(RD_ADVN.pos,rng);
   var lab={now:"い/な형용사 현재",past:"형용사 과거 (かったです/でした)",neg:"형용사 부정 (くないです/じゃないです)",negpast:"형용사 과거부정 (くなかったです)"}[form];
-  return rdT3(e[0]+ad[0]+aj+"。",e[1]+ad[1]+ak+"。",rdJoinKo(e[2],ad[2],ko)+".",lab+" + "+ad[0]);
+  var oo=rdT3(e[0]+ad[0]+aj+"。",e[1]+ad[1]+ak+"。",rdJoinKo(e[2],ad[2],ko)+".",lab+" + "+ad[0]);
+  oo.p={pre:e[0],prek:e[1],subko:e[2],ad:ad,aj:aj,ak:ak,ko:ko};
+  return oo;
 }
 /* 명사 — 학습 일기 문장 (어떤 명사에도 어색하지 않은 틀) */
 function rdNM(w){var m=rdPlain(w),ka=w.kana||w.jp;return {jp:"「"+w.jp+"」",ka:"「"+ka+"」",ko:"「"+w.jp+"」("+m+")",m:m,bat:rdBat(m)};}
@@ -7316,27 +7318,132 @@ function rdBuild3(ws,rng,dt,dayNo){
   return {lines:lines,facts:facts,gram:gram,title:"오늘의 일기 · "+(dt.getMonth()+1)+"월 "+dt.getDate()+"일 ("+wd+")"};
 }
 
+/* ===== 읽기 v4: 회화 6줄 + 일기 4줄 + 상황별 Q&A (자연스러운 문장만, 단어는 억지로 끼우지 않음) ===== */
+var RD_QA=[
+ /* [질문 jp, 가나, 한국어], [대답 jp, 가나, 한국어], 내가 묻는가(1)/대답하는가(0), 태그(오늘 단어와 겹치면 우선) */
+ [["すみません、メニューを見てもいいですか。","すみません、メニューをみてもいいですか。","실례합니다, 메뉴를 봐도 될까요?"],["はい、どうぞ。","はい、どうぞ。","네, 보세요."],1,["見る"]],
+ [["コーヒーをください。","コーヒーをください。","커피 주세요."],["ホットですか、アイスですか。","ホットですか、アイスですか。","따뜻한 걸로요, 아이스로요?"],1,["コーヒー"]],
+ [["駅はどこですか。","えきはどこですか。","역은 어디예요?"],["まっすぐ行って、右です。","まっすぐいって、みぎです。","쭉 가서 오른쪽이에요."],1,["駅","行く"]],
+ [["今、何時ですか。","いま、なんじですか。","지금 몇 시예요?"],["三時半です。","さんじはんです。","3시 반이에요."],1,["時間"]],
+ [["これはいくらですか。","これはいくらですか。","이건 얼마예요?"],["五百円です。","ごひゃくえんです。","500엔이에요."],1,["値段","円"]],
+ [["一緒に昼ごはんを食べませんか。","いっしょにひるごはんをたべませんか。","같이 점심 먹지 않을래요?"],["いいですね。何を食べますか。","いいですね。なにをたべますか。","좋아요. 뭘 먹을까요?"],0,["食べる"]],
+ [["日曜日は何をしましたか。","にちようびはなにをしましたか。","일요일에는 뭘 했어요?"],["友だちと映画を見ました。","ともだちとえいがをみました。","친구와 영화를 봤어요."],0,["見る","映画"]],
+ [["週末はどうでしたか。","しゅうまつはどうでしたか。","주말은 어땠어요?"],["とても楽しかったです。","とてもたのしかったです。","아주 즐거웠어요."],0,["楽しい"]],
+ [["日本語は難しいですか。","にほんごはむずかしいですか。","일본어는 어려워요?"],["ちょっと難しいですが、おもしろいです。","ちょっとむずかしいですが、おもしろいです。","조금 어렵지만 재미있어요."],0,["難しい","おもしろい"]],
+ [["ここで写真を撮ってもいいですか。","ここでしゃしんをとってもいいですか。","여기서 사진 찍어도 될까요?"],["はい、いいですよ。","はい、いいですよ。","네, 괜찮아요."],1,["撮る","写真"]],
+ [["明日は何時に起きますか。","あしたはなんじにおきますか。","내일은 몇 시에 일어나요?"],["六時に起きます。","ろくじにおきます。","6시에 일어나요."],0,["起きる"]],
+ [["今日は寒いですね。","きょうはさむいですね。","오늘 춥네요."],["そうですね。コートを着たほうがいいですよ。","そうですね。コートをきたほうがいいですよ。","그러네요. 코트를 입는 게 좋겠어요."],0,["寒い","着る"]],
+ [["何を飲みますか。","なにをのみますか。","뭘 마실래요?"],["水をお願いします。","みずをおねがいします。","물 부탁해요."],0,["飲む","水"]],
+ [["電車で行きますか。","でんしゃでいきますか。","전철로 가요?"],["いいえ、バスで行きます。","いいえ、バスでいきます。","아니요, 버스로 가요."],0,["行く","電車","バス"]],
+ [["日本語を勉強していますか。","にほんごをべんきょうしていますか。","일본어를 공부하고 있어요?"],["はい、毎日少しずつ勉強しています。","はい、まいにちすこしずつべんきょうしています。","네, 매일 조금씩 공부하고 있어요."],0,["勉強"]],
+ [["荷物を持ちましょうか。","にもつをもちましょうか。","짐을 들어 드릴까요?"],["ありがとうございます。助かります。","ありがとうございます。たすかります。","감사합니다. 도움이 돼요."],1,["持つ","荷物"]],
+ [["窓を開けてもいいですか。","まどをあけてもいいですか。","창문을 열어도 될까요?"],["はい、どうぞ。暑いですからね。","はい、どうぞ。あついですからね。","네, 그러세요. 더우니까요."],1,["開ける","暑い"]],
+ [["昨日はよく寝ましたか。","きのうはよくねましたか。","어제는 잘 잤어요?"],["いいえ、あまり寝ませんでした。","いいえ、あまりねませんでした。","아니요, 별로 못 잤어요."],0,["寝る"]],
+ [["この近くにコンビニはありますか。","このちかくにコンビニはありますか。","이 근처에 편의점이 있어요?"],["はい、あそこにありますよ。","はい、あそこにありますよ。","네, 저기에 있어요."],1,["ある"]],
+ [["誕生日はいつですか。","たんじょうびはいつですか。","생일은 언제예요?"],["三月五日です。","さんがついつかです。","3월 5일이에요."],0,["誕生日"]],
+ [["友だちを待っていますか。","ともだちをまっていますか。","친구를 기다리고 있어요?"],["はい、もう少し待ちます。","はい、もうすこしまちます。","네, 조금 더 기다릴게요."],0,["待つ"]],
+ [["何を買いましたか。","なにをかいましたか。","뭘 샀어요?"],["新しいかばんを買いました。","あたらしいかばんをかいました。","새 가방을 샀어요."],0,["買う","新しい","かばん"]],
+ [["お名前は何ですか。","おなまえはなんですか。","성함이 어떻게 되세요?"],["キムです。よろしくお願いします。","キムです。よろしくおねがいします。","김입니다. 잘 부탁드립니다."],1,["名前"]],
+ [["もう一度言ってください。","もういちどいってください。","한 번 더 말해 주세요."],["はい。ゆっくり言いますね。","はい。ゆっくりいいますね。","네. 천천히 말할게요."],1,["言う"]],
+ [["休みの日は何をしますか。","やすみのひはなにをしますか。","쉬는 날에는 뭘 해요?"],["たいてい家で本を読みます。","たいていいえでほんをよみます。","보통 집에서 책을 읽어요."],0,["休み","読む"]]
+];
+function rdQAIdx(words,dayNo,n){
+  var ws={},i,j,sc=[];
+  words.forEach(function(w){ws[w[0]]=1;});
+  for(i=0;i<RD_QA.length;i++){var hit=0;for(j=0;j<RD_QA[i][3].length;j++)if(ws[RD_QA[i][3][j]])hit=1;sc.push({i:i,hit:hit,o:((i*7+dayNo*3)%RD_QA.length)});}
+  sc.sort(function(a,b){return (b.hit-a.hit)||(a.o-b.o);});
+  return sc.slice(0,n).map(function(x){return x.i;});
+}
+function rdBuild4(ws,rng,dt,dayNo){
+  var vs=[],as=[],used={},lines=[],facts=[],words=ws.map(function(w){return [w.jp];});
+  ws.forEach(function(w){
+    var p=wPos(w),b=(p==="na")?naBase(w):w;
+    if(RDV[w.jp]){var vp=rdVP(w);if(vp)vs.push(vp);}
+    else if((p==="i"||p==="na")&&RDA[b.jp])as.push(w);
+  });
+  function add(l,sec,spk){l[4]=sec;if(spk)l[5]=spk;lines.push(l);return l;}
+  var reg=vs.filter(function(v){return v.fl===""&&v.reg;}),spec=vs.filter(function(v){return v.fl!=="";});
+  var specM=spec.filter(function(v){return /m/.test(v.fl);}),specE=spec.filter(function(v){return /e/.test(v.fl)&&!/m/.test(v.fl);}),
+      specO=spec.filter(function(v){return !/[me]/.test(v.fl);});
+  var Ad=rdShuf(as,rng),adj1=Ad[0]||null,adj2=Ad[1]||null;
+  var vA=reg[0]||null,vB=reg[1]||reg[0]||null,vC=reg[2]||reg[1]||reg[0]||null;
+  function pair(q,a,g1){add(rdT3(q[0],q[1],q[2],g1),"conv","田中");add(a,"conv","私");}
+  function bank(x,sec){var b=RD_QA[x],me=b[2]===1;
+    add(rdT3(b[0][0],b[0][1],b[0][2],""),sec,me?"私":"田中");add(rdT3(b[1][0],b[1][1],b[1][2],""),sec,me?"田中":"私");
+    b[3].forEach(function(t){ws.forEach(function(w){if(w.jp===t)used[w.jp]=1;});});}
+  /* ① 일상 회화 — 3문답(6문장) */
+  var np=0;
+  if(vA){var a1=rdVG("past",vA,null,rng);pair(["昨日は何をしましたか。","きのうはなにをしましたか。","어제는 무엇을 했습니까?"],a1,"〜ましたか (과거 질문)");used[vA.w.jp]=1;np++;}
+  else if(specO.length){var r0=rdVLine(specO[0].w,{kind:"past",time:RD_T.yd,alt:RD_T.yd},rng);if(r0){pair(["昨日は何をしましたか。","きのうはなにをしましたか。","어제는 무엇을 했습니까?"],rdT3(r0.l[0].replace(/^昨日は/,""),r0.l[1].replace(/^きのうは/,""),r0.l[2].replace(/^어제는 /,""),"〜ました (과거)"),"〜ましたか (과거 질문)");used[specO[0].w.jp]=1;np++;}}
+  if(adj1){
+    var fm=rdPick(["now","past","neg"],rng),al=rdAG(adj1,fm,rng);
+    if(al&&al.p&&/は$/.test(al.p.pre)){
+      var past=(fm==="past"),q2=[al.p.pre+(past?"どうでしたか。":"どうですか。"),al.p.prek+(past?"どうでしたか。":"どうですか。"),al.p.subko+(past?" 어땠습니까?":" 어떻습니까?")];
+      var a2=rdT3(al.p.ad[0]+al.p.aj+"。",al.p.ad[1]+al.p.ak+"。",al.p.ad[2]+" "+al.p.ko+".",al[3]);
+      pair(q2,a2,"〜はどうですか (상태 묻기)");used[adj1.jp]=1;np++;
+    }
+  }
+  if(vB&&np<3){var a3=rdVG("tai",vB,null,rng);pair(["明日は何をしたいですか。","あしたはなにをしたいですか。","내일은 무엇을 하고 싶습니까?"],a3,"〜たいですか (희망 묻기)");used[vB.w.jp]=1;np++;}
+  /* 부족하면 상황별 문답으로 채움 */
+  var fill=rdQAIdx(ws.map(function(w){return [w.jp];}),dayNo+3,6),fi=0;
+  var qaUsed=[];
+  while(np<3&&fi<fill.length){var bi=fill[fi++];bank(bi,"conv");np++;qaUsed.push(bi);}
+  /* ② 짧은 일기 — 4~5문장 */
+  if(specM.length){var m=rdVLine(specM[0].w,{kind:"past",time:RD_T.mo,alt:RD_T.yd},rng);if(m){var lm=rdT3(m.l[0],m.l[1],m.l[2],"〜ました (과거)");add(lm,"diary");used[specM[0].w.jp]=1;if(m.kind==="past"&&m.ans&&m.time)facts.push({time:m.time,ans:m.ans,jp:lm[0],ko:lm[2]});}}
+  else if(vC){var d1=rdVG("past",vC,RD_T.am,rng);d1[3]="〜ました (과거)";add(d1,"diary");facts.push({time:RD_T.am,ans:koFixI(rdJoinKo(vC.e[2],vC.kc.past)),jp:d1[0],ko:d1[2]});used[vC.w.jp]=1;}
+  var pk=rdPick(["te","kara","mae"],rng);
+  if(reg.length>=2){var lc=rdVC(pk,reg[1],reg[0],RD_T.pm);if(lc){add(lc,"diary");used[reg[0].w.jp]=1;used[reg[1].w.jp]=1;}}
+  specO.forEach(function(v){var r=rdVLine(v.w,{kind:"past",time:RD_T.yd,alt:RD_T.yd},rng);if(r){var l=add(rdT3(r.l[0],r.l[1],r.l[2],v.fl==="x"?"일상 표현":/n/.test(v.fl)?"〜ました (과거)":/k/.test(v.fl)?"〜ています (상태)":"〜ました (과거)"),"diary");used[v.w.jp]=1;if(r.kind==="past"&&r.ans&&r.time)facts.push({time:r.time,ans:r.ans,jp:l[0],ko:l[2]});}});
+  if(adj2){var fm2=rdPick(["now","past","neg","negpast"],rng),l2=rdAG(adj2,fm2,rng);if(l2){add(l2,"diary");used[adj2.jp]=1;}}
+  specE.forEach(function(v){var r=rdVLine(v.w,{kind:"past",time:RD_T.ni,alt:RD_T.yd},rng);if(r){var l=add(rdT3(r.l[0],r.l[1],r.l[2],"〜ました (과거)"),"diary");used[v.w.jp]=1;if(r.kind==="past"&&r.ans&&r.time)facts.push({time:r.time,ans:r.ans,jp:l[0],ko:l[2]});}});
+  var pv=vC||vB||vA;
+  if(pv){var pkd=rdPick(["tsumori","hou"],rng),lp=rdVG(pkd,pv,RD_T.tmr,rng);if(lp){add(lp,"diary");used[pv.w.jp]=1;}}
+  else add(rdT3("明日もがんばります。","あしたもがんばります。","내일도 힘내겠습니다.","〜ます (미래)"),"diary");
+  /* ③ 상황별 질문과 답변 — 2문답 */
+  var qi=rdQAIdx(ws.map(function(w){return [w.jp];}),dayNo,8).filter(function(x){return qaUsed.indexOf(x)<0;}).slice(0,2);
+  qi.forEach(function(x){bank(x,"qa");});
+  facts=facts.filter(function(f){return f.time[0]!=="昨日は";});
+  var gram=[],seen={};
+  lines.forEach(function(l){var key=(l[3]||"").split(" + ")[0].replace(/ \(.*\)$/,"");if(key&&!seen[key]){seen[key]=1;gram.push(key);}});
+  var wd=["일","월","화","수","목","금","토"][dt.getDay()];
+  return {lines:lines,facts:facts,gram:gram,used:used,title:"오늘의 회화 · 일기 · Q&A · "+(dt.getMonth()+1)+"월 "+dt.getDate()+"일 ("+wd+")"};
+}
+
 function rdGenToday(){
   ensureChallenge();
   var ws=chWords();
   if(!ws||ws.length<2)return null;
-  var id="gen3-"+todayStr()+"-"+rdHash((S.ch.ids||[]).join(",")),dt=dParse(todayStr());
+  var id="gen4-"+todayStr()+"-"+rdHash((S.ch.ids||[]).join(",")),dt=dParse(todayStr());
   if(S._rdg&&S._rdg.id===id)return S._rdg;
   var rng=rdRng(rdHash(id)),dayNo=Math.floor(dt.getTime()/86400000);
-  var P=rdBuild3(ws,rng,dt,dayNo);P.fr={t:P.title,sub:"오늘 단어 10개 + YBM 문법",gram:P.gram};
-  var words=ws.map(function(w){return [w.jp,w.kana||w.jp,rdPlain(w)];});
+  var P=rdBuild4(ws,rng,dt,dayNo);P.fr={t:P.title,sub:"오늘 단어로 만든 자연스러운 글",gram:P.gram};
+  var words=ws.map(function(w){return [w.jp,w.kana||w.jp,rdPlain(w),P.used[w.jp]?1:0];});
   P.lines.forEach(function(l){sayReg(l[0],l[1]);});
-  var quiz=rdQuizOf(P,words,rng,P.lines);
-  (function(){var gl=P.lines.filter(function(l){return l[3]&&l.k!=="a"||l[3]&&l.k==="a";}),labs=[];
+  var ql=P.lines.filter(function(l){return l[5]!=="田中"&&l[2];});
+  var quiz=rdQuizOf(P,words,rng,ql);
+  (function(){var labs=[];
     P.lines.forEach(function(l){var k=(l[3]||"").split(" + ")[0].split(" (")[0];if(k&&labs.indexOf(k)<0)labs.push(k);});
     if(labs.length<4)return;
-    var pk=P.lines.filter(function(l){return l[3]&&l.k!=="n";});if(!pk.length)return;
+    var pk=P.lines.filter(function(l){return l[3];});if(!pk.length)return;
     var L=pk[Math.floor(rng()*pk.length)],key=(L[3]||"").split(" + ")[0].split(" (")[0];
     var opts=rdShuf([key].concat(rdShuf(labs.filter(function(x){return x!==key;}),rng).slice(0,3)),rng);
     quiz.push({q:"「"+L[0]+"」— 이 문장에 쓰인 문법은?",opts:opts,a:opts.indexOf(key),w:L[0]+" — "+L[3]});
   })();
   S._rdg={id:id,gen:true,t:P.fr.t,sub:P.fr.sub,lv:"0",gram:P.fr.gram,lines:P.lines,words:words,quiz:quiz};
+  try{rdLogSave(S._rdg);}catch(e){}
   return S._rdg;
+}
+/* ===== 날짜별 학습 기록 (복습용) ===== */
+function dayStrOff(off){var d=dParse(todayStr());d.setDate(d.getDate()+off);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function rdLogSave(R){
+  var log=LS.get("jp.dlog",{}),t=todayStr();
+  if(log[t]&&log[t].id===R.id)return;
+  log[t]={id:R.id,w:R.words.map(function(w){return [w[0],w[1],w[2]];}),
+          l:R.lines.map(function(l){return [l[0],l[1],l[2],l[4]||"",l[5]||""];})};
+  var ks=Object.keys(log).sort();
+  while(ks.length>40){delete log[ks.shift()];}
+  LS.set("jp.dlog",log);
 }
 function rdSync(){
   var g=null;
@@ -7363,6 +7470,163 @@ function rdKana(t){
   if(!f||f===t||KANJI.test(f))return "";
   return f;
 }
+/* ===== 한→일 말하기 연습: 정답을 가린 채 답하고, 문법 오류와 자연스러움을 나눠서 교정 ===== */
+function spNorm(t){return (t||"").replace(/[\s　。、．，！？!?,."'「」『』〜~：:]/g,"").replace(/[ァ-ヶ]/g,function(c){return String.fromCharCode(c.charCodeAt(0)-96);});}
+var SP_PART="はがをにでへともの";
+var SP_TAILS=[["ませんでした","과거 부정(〜하지 않았습니다)"],["ました","과거(〜했습니다)"],["ません","부정(〜하지 않습니다)"],["ますか","질문(〜합니까?)"],["ます","현재·미래(〜합니다)"],["くなかったです","い형용사 과거부정"],["じゃなかったです","な형용사·명사 과거부정"],["かったです","い형용사 과거"],["でした","명사·な형용사 과거"],["くないです","い형용사 부정"],["じゃないです","な형용사·명사 부정"],["たいです","〜하고 싶습니다"],["ましょう","〜합시다"],["ませんか","〜하지 않을래요?"],["ですか","〜입니까?"],["です","〜입니다·〜해요"]];
+function spKata(seg,un){
+  var k=seg.replace(/[ぁ-ゖ]/g,function(c){return String.fromCharCode(c.charCodeAt(0)+96);});
+  return (k!==seg&&un.indexOf(k)>=0)?k:seg;
+}
+function spTail(n){for(var i=0;i<SP_TAILS.length;i++){var t=SP_TAILS[i][0];if(n.slice(-t.length)===t)return SP_TAILS[i];}return null;}
+function spLcs(a,b){
+  var n=a.length,m=b.length,d=[],i,j;
+  for(i=0;i<=n;i++){d.push([]);for(j=0;j<=m;j++)d[i].push(0);}
+  for(i=n-1;i>=0;i--)for(j=m-1;j>=0;j--)d[i][j]=(a.charAt(i)===b.charAt(j))?d[i+1][j+1]+1:Math.max(d[i+1][j],d[i][j+1]);
+  var segs=[],x=0,y=0,da="",db="";
+  function flush(){if(da||db){segs.push({a:da,b:db});da="";db="";}}
+  while(x<n&&y<m){
+    if(a.charAt(x)===b.charAt(y)){flush();x++;y++;}
+    else if(d[x+1][y]>=d[x][y+1]){da+=a.charAt(x++);}
+    else{db+=b.charAt(y++);}
+  }
+  da+=a.slice(x);db+=b.slice(y);flush();
+  return {len:d[0][0],segs:segs};
+}
+function spFeed(it,input){
+  var res={lv:"bad",gram:[],nat:[],note:""};
+  var raw=(input||"").trim();
+  if(!raw){res.note="아직 입력이 없어요.";return res;}
+  if(/^[\x00-\x7F]+$/.test(raw)&&!/[ぁ-んァ-ヶ一-龥]/.test(raw)){
+    var j0=judge(raw,{ok:[it.jp,it.ka,romaji(it.ka)]});
+    if(j0===2){res.lv="ok";return res;}
+    res.note="가나나 한자로 입력해 주세요. (로마자는 정답과 정확히 같을 때만 인정돼요)";return res;
+  }
+  var j=judge(raw,{ok:[it.jp,it.ka,romaji(it.ka)]});
+  if(j===2){res.lv="ok";return res;}
+  var nIn=spNorm(raw),tA=spTail(spNorm(it.ka)),tI=spTail(nIn),tailG=false;
+  if(tA){
+    if(!tI){res.gram.push("문장 끝: 정답은 「"+tA[0]+"」("+tA[1]+") 형태예요. 지금 문장은 정중체(です・ます)로 끝나지 않았어요.");tailG=true;}
+    else if(tI[0]!==tA[0]){res.gram.push("문장 끝: 「"+tI[0]+"」("+tI[1]+") 대신 「"+tA[0]+"」("+tA[1]+") 가 맞아요.");tailG=true;}
+  }
+  var inS=tI?nIn.slice(0,nIn.length-tI[0].length):nIn;
+  function stripT(n){var t=spTail(n);return t?n.slice(0,n.length-t[0].length):n;}
+  var A1=stripT(spNorm(it.jp)),A2=stripT(spNorm(it.ka));
+  var l1=spLcs(A1,inS),l2=spLcs(A2,inS),
+      useJ=(l1.len/Math.max(A1.length,inS.length,1))>=(l2.len/Math.max(A2.length,inS.length,1)),
+      ans=useJ?A1:A2,L=useJ?l1:l2,ratio=L.len/Math.max(ans.length,inS.length,1);
+  var unfold=(it.jp||"").replace(/[\s　。、]/g,"");
+  L.segs.forEach(function(sg){
+    var a=spKata(sg.a,unfold),b=sg.b;
+    if(a.length===1&&b.length===1&&SP_PART.indexOf(a)>=0&&SP_PART.indexOf(b)>=0)res.gram.push("조사: 「"+b+"」 대신 「"+a+"」 를 써야 해요.");
+    else if(a&&!b&&a.length===1&&SP_PART.indexOf(a)>=0)res.gram.push("조사 「"+a+"」 가 빠졌어요.");
+    else if(!a&&b&&b.length===1&&SP_PART.indexOf(b)>=0)res.gram.push("조사 「"+b+"」 는 필요 없어요.");
+    else if(a&&b)res.nat.push("「"+b+"」 대신 이 상황에서는 「"+a+"」 를 써요.");
+    else if(a)res.nat.push("빠진 표현: 「"+a+"」");
+    else if(b)res.nat.push("없어도 되는(어색한) 부분: 「"+b+"」");
+  });
+  res.lv=(ratio>=0.85&&!res.gram.length)?"near":"bad";
+  if(!res.gram.length&&!res.nat.length)res.note="표기만 다릅니다. 정답과 비교해 보세요.";
+  return res;
+}
+function spBuild(){
+  var R=READS[rdTodayIdx()],items=[],i,L,q;
+  if(!R)return [];
+  for(i=0;i<R.lines.length;i++){
+    L=R.lines[i];
+    if(L[5]==="田中"||!L[2])continue;
+    q=null;
+    if(i>0&&R.lines[i-1][5]==="田中"&&R.lines[i-1][4]===L[4])q=R.lines[i-1];
+    items.push({jp:L[0],ka:L[1],ko:L[2],ctx:q?q[2]:"",ctxJp:q?q[0]:""});
+  }
+  items=shuffle(items).slice(0,8);
+  return items;
+}
+function spStart(){S.sp={items:spBuild(),i:0,res:null,input:"",hint:0,done:0,ok:0,shown:false};}
+function viewSpk(){
+  var h="";
+  if(!S.sp||!S.sp.items.length)spStart();
+  var P=S.sp;
+  h+='<div class="card" style="margin-bottom:12px"><div class="tag mono">한→일 말하기 연습</div>'+
+     '<div class="body">한국어 문장을 보고 <b>일본어로 직접 말하거나 써 보세요.</b> 정답은 제출하기 전에는 보이지 않아요. '+
+     '틀리면 <b>문법 오류</b>(조사·문장 끝 형태)와 <b>자연스럽지 않은 표현</b>(단어·빠진 말)을 나눠서 알려 줍니다. '+
+     '※ 정답 문장과의 규칙 비교라서, 같은 뜻의 다른 자연스러운 표현은 틀린 것으로 나올 수 있어요.</div></div>';
+  if(!P.items.length){return h+'<div class="empty">오늘 읽기 글이 아직 없어요. 홈에서 단어를 먼저 확인해 주세요.</div>';}
+  if(P.i>=P.items.length){
+    h+='<div class="empty"><b>오늘 말하기 연습 끝</b>'+P.items.length+'문장 중 '+P.ok+'문장을 정확히 맞혔어요.</div>'+
+       '<div class="row"><button class="btn main" data-a="spreset">다시 하기</button></div>';
+    return h;
+  }
+  var it=P.items[P.i];
+  h+='<div class="mono" style="font-size:17px;color:#8A9CBE;display:flex;justify-content:space-between;margin:6px 0"><span>'+(P.i+1)+' / '+P.items.length+'</span><span>정확 '+P.ok+'</span></div>';
+  h+='<div class="bar"><i style="width:'+(P.i/P.items.length*100)+'%;background:#2FA05E"></i></div><div class="card">';
+  if(it.ctx)h+='<div style="font-size:19px;color:#8A9CBE;margin-bottom:8px">田中: '+esc(it.ctx)+'</div>';
+  h+='<div class="qform" style="color:#F0C560;font-size:32px;border-bottom:none">'+esc(it.ko)+'</div>'+
+     '<div style="text-align:center;font-size:18px;color:var(--dim);margin-top:2px">일본어로 말해 보세요</div>';
+  if(P.res===null){
+    if(P.hint)h+='<div style="text-align:center;font-size:22px;color:#9CC8E4;margin-top:8px">힌트: '+esc(it.ka.slice(0,Math.min(P.hint*3,it.ka.length)))+'…</div>';
+    h+='<input class="ansbox" id="spbox" type="text" autocomplete="off" autocapitalize="off" placeholder="일본어로 입력 (가나·한자)" value="'+esc(P.input||"")+'">'+
+       '<div class="row"><button class="btn" data-a="spmic">🎤 말하기</button><button class="btn" data-a="sphint">힌트</button></div>'+
+       (S.micOn?'<p class="note">듣는 중… 일본어로 말해 보세요.</p>':(S.micErr?'<p class="note" style="color:#F0A091">'+esc(S.micErr)+'</p>':""))+
+       '<div class="row"><button class="btn main" data-a="spcheck">확인</button><button class="btn" data-a="spgive">모르겠어요 · 정답 보기</button></div>';
+  }else{
+    var f=P.res,col=f.lv==="ok"?"#7ED9A6":(f.lv==="near"?"#F0C560":"#F0A091");
+    h+='<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">'+
+       '<div class="verdict" style="color:'+col+'">'+(f.lv==="ok"?"정확해요!":(f.lv==="near"?"거의 맞았어요":(f.gave?"정답을 확인해 봅시다":"다시 확인해 봅시다")))+'</div>'+
+       (P.input?'<div style="font-size:20px;color:var(--dim);margin-top:6px">내 답: '+esc(P.input)+'</div>':"");
+    if(f.gram.length)h+='<div class="why" style="margin-top:10px;border-left:3px solid #E4573D"><b style="color:#F0A091">문법 오류</b><br>'+f.gram.map(esc).join("<br>")+'</div>';
+    if(f.nat.length)h+='<div class="why" style="margin-top:10px;border-left:3px solid #F0C560"><b style="color:#F0C560">자연스러운 표현</b><br>'+f.nat.map(esc).join("<br>")+'</div>';
+    if(f.note)h+='<div class="why" style="margin-top:10px">'+esc(f.note)+'</div>';
+    h+='<div style="font-size:21px;color:#5E739C;margin-top:12px">'+esc(it.ka)+'</div>'+
+       '<div style="font-size:32px;font-weight:900;line-height:1.35">'+esc(it.jp)+' '+pb(it.jp,it.ka)+'</div>'+
+       (koPronPair(it.jp,it.ka)?'<div class="skp" style="margin-top:2px">'+esc(koPronPair(it.jp,it.ka))+'</div>':"")+
+       '<div style="font-size:22px;color:#F0C560;margin-top:4px">'+esc(it.ko)+'</div></div>'+
+       '<div class="row" style="margin-top:12px"><button class="btn" data-a="spretry">다시 말해 보기</button><button class="btn main" data-a="spnext">다음 →</button></div>';
+  }
+  h+='</div>';
+  return h;
+}
+function spCheck(txt){
+  var P=S.sp,it=P.items[P.i];
+  P.input=txt;P.res=spFeed(it,txt);P.done++;if(P.res.lv==="ok")P.ok++;
+  S.total++;saveTotal();dayBump("drill");render();say(it.jp,S.rdRate||0.8);
+}
+/* ===== 복습: 1일·3일·7일 전 학습 ===== */
+function rvDone(){return LS.get("jp.rvdone",{});}
+function rvDue(){
+  var log=LS.get("jp.dlog",{}),dn=rvDone(),out=[];
+  [1,3,7].forEach(function(k){var d=dayStrOff(-k);if(log[d])out.push({k:k,date:d,e:log[d],done:!!dn[d+"|"+k]});});
+  return out;
+}
+function viewRev(){
+  var h="",due=rvDue(),i,j;
+  h+='<div class="card" style="margin-bottom:12px"><div class="tag mono">복습 · 1일 · 3일 · 7일 전</div>'+
+     '<div class="body">그날 읽기에서 만난 <b>단어와 문장</b>을 날짜별로 저장해 두었다가 1일·3일·7일 뒤에 다시 꺼내 줍니다. '+
+     '먼저 한국어 뜻만 보고 일본어를 떠올려 본 뒤 눌러서 확인하세요.</div></div>';
+  if(!due.length){h+='<div class="empty"><b>오늘 복습할 기록이 없어요</b>읽기 한 편을 열면 그날 기록이 저장되고, 1일·3일·7일 뒤에 여기에 나타납니다.</div>';return h;}
+  due.forEach(function(g){
+    var key=g.date+"|"+g.k,dd=g.date.split("-");
+    h+='<div class="card" style="margin-bottom:12px"><div class="tag mono">'+g.k+'일 전 · '+(+dd[1])+'월 '+(+dd[2])+'일'+(g.done?' · 복습 완료 ✓':'')+'</div>';
+    h+='<div class="sec mono" style="margin:6px 0">단어</div><table class="vocab">';
+    g.e.w.forEach(function(w,wi){
+      var ok=S.rvOpen&&S.rvOpen[key+"w"+wi];
+      h+='<tr><td class="v4" style="font-size:22px">'+esc(w[2])+'</td><td>'+
+         (ok?'<div class="v1" style="font-size:26px">'+esc(w[0])+' '+pb(w[0],w[1])+'</div>'+(w[0]!==w[1]?'<div class="v2">'+esc(w[1])+'</div>':"")
+            :'<button class="link" data-a="rvopen" data-v="'+key+'w'+wi+'">눌러서 확인</button>')+'</td></tr>';});
+    h+='</table><div class="sec mono" style="margin:12px 0 6px">문장</div>';
+    var shown=0;
+    for(j=0;j<g.e.l.length&&shown<8;j++){
+      var l=g.e.l[j];if(l[4]==="田中"||!l[2])continue;shown++;
+      var ok2=S.rvOpen&&S.rvOpen[key+"l"+j];
+      h+='<div class="rdline"><div class="rm" style="font-size:22px">'+esc(l[2])+'</div>'+
+         (ok2?'<div class="rk">'+esc(l[1])+'</div><div class="rj">'+esc(l[0])+' '+pb(l[0],l[1])+'</div>'+(koPronPair(l[0],l[1])?'<div class="skp">'+esc(koPronPair(l[0],l[1]))+'</div>':""):
+            '<button class="link" data-a="rvopen" data-v="'+key+'l'+j+'">일본어 확인</button>')+'</div>';
+    }
+    h+='<div class="row" style="margin-top:12px"><button class="btn'+(g.done?'':' main')+'" data-a="rvdone" data-v="'+key+'">'+(g.done?'복습 완료 취소':'이 복습 완료')+'</button></div></div>';
+  });
+  return h;
+}
+
 /* ===== 읽기 전체 듣기 — 한 줄씩 차례로, 반복 횟수 지정, 중간에 끊기지 않게 ===== */
 function rdStop(){S.rdTok++;S.rdPlaying=false;stopSay();rdMark(-1);try{keepAwake(false);}catch(e){}}
 function rdMark(ix){
@@ -7459,21 +7723,24 @@ function viewRead(){
      [1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option value="'+n+'"'+(S.rdRep===n?" selected":"")+'>'+n+'회</option>';}).join("")+
      '</select></span></span></div>'+
      '<div id="rdstat" class="pmini" style="margin:-2px 0 8px;min-height:20px">'+(S.rdPlaying?"재생 중…":"문장을 한 줄씩 차례로 읽어 줍니다. 반복 횟수를 정할 수 있어요.")+'</div>';
+  var SECN={conv:"① 일상 회화",diary:"② 짧은 일기",qa:"③ 상황별 질문과 답변"},lastSec="";
   for(i=0;i<R.lines.length;i++){
     var L=R.lines[i];
+    if(L[4]&&L[4]!==lastSec){lastSec=L[4];h+='<div class="sec mono" style="margin:16px 0 6px">'+esc(SECN[L[4]]||"")+'</div>';}
     h+='<div class="rdline">'+
        (S.rdKana?'<div class="rk">'+esc(L[1])+'</div>':"")+
-       '<div class="rj">'+esc(L[0])+' <button class="link" data-a="rdsay" data-v="'+i+'">▶</button></div>'+
+       '<div class="rj">'+(L[5]?'<span style="font-size:17px;color:#F0C560;font-weight:700;margin-right:8px">'+esc(L[5])+'</span>':"")+esc(L[0])+' <button class="link" data-a="rdsay" data-v="'+i+'">▶</button></div>'+
        (S.rdKp&&koPronPair(L[0],L[1])?'<div class="skp" style="margin:2px 0 1px">'+esc(koPronPair(L[0],L[1]))+'</div>':"")+
        (S.rdKo?'<div class="rm">'+esc(L[2])+'</div>':"")+(L[3]?'<div style="font-size:17px;color:#7ED9A6;margin-top:3px">문법 · '+esc(L[3])+'</div>':"")+'</div>';
   }
+  h+='<div class="row" style="margin-top:12px"><button class="btn main" data-a="goto" data-v="talk:spk">🗣 한→일 말하기 연습 (정답 가리고)</button></div>';
   h+='</div>';
 
   h+='<div class="sec mono" style="margin-top:18px">새 단어</div><table class="vocab">';
   for(i=0;i<R.words.length;i++)
     h+='<tr><td><div class="v1" style="font-size:27px">'+esc(R.words[i][0])+'</div>'+
        (R.words[i][0]!==R.words[i][1]?'<div class="v2">'+esc(R.words[i][1])+'</div>':"")+'</td>'+
-       '<td class="v4">'+esc(R.words[i][2])+'<div class="v2" style="color:#C99BE0">'+esc(koPron(R.words[i][1]))+'</div></td>'+
+       '<td class="v4">'+esc(R.words[i][2])+'<div class="v2" style="color:#C99BE0">'+esc(koPron(R.words[i][1]))+'</div>'+(R.gen?'<div class="v2" style="color:'+(R.words[i][3]?'#7ED9A6':'#8A9CBE')+'">'+(R.words[i][3]?'오늘 글에 사용':'오늘 글에는 안 썼어요 (억지로 넣지 않음)')+'</div>':'')+'</td>'+
        '<td style="width:38px">'+pb(R.words[i][0],R.words[i][1])+'</td></tr>';
   h+='</table>';
 
@@ -7552,6 +7819,15 @@ function viewHome(){
        '<button class="btn sm" data-a="rdtoday">읽기</button>'+
      '</div>'+
 
+     (function(){var due=rvDue(),nd=due.filter(function(x){return !x.done;}).length;
+       return '<div class="todo'+(due.length&&!nd?" ok":(due.length?"":" dim"))+'">'+
+         '<span class="n">＋</span><span class="t"><b>복습 · 1일 · 3일 · 7일 전</b>'+
+         '<i>'+(due.length?(nd?'오늘 복습할 날짜 '+nd+'개 — 단어와 문장을 다시 꺼내 봐요':'오늘 복습을 모두 마쳤어요'):'아직 복습할 기록이 없어요 (읽기를 열면 그날 기록이 저장돼요)')+'</i></span>'+
+         '<button class="btn sm" data-a="goto" data-v="talk:rev">복습</button></div>'+
+         '<div class="todo"><span class="n">＋</span><span class="t"><b>한→일 말하기 연습</b>'+
+         '<i>한국어를 보고 일본어로 답하기 — 문법 오류와 자연스러움을 나눠 교정</i></span>'+
+         '<button class="btn sm" data-a="goto" data-v="talk:spk">말하기</button></div>';})()+
+
      '<div class="todo'+(wk>=10?"":" dim")+'">'+
        '<span class="n">4</span>'+
        '<span class="t"><b>주간 재테스트</b>'+
@@ -7618,12 +7894,12 @@ function render(){
   else if(S.tab==="vocab"){h+=viewVocab();}
   else if(S.tab==="drill"){h+=viewDrill();}
   else if(S.tab==="talk"){
-    var tsubs=[["scene","상황 대화"],["read","읽기"],["card","표현 카드"]],ti;
+    var tsubs=[["scene","상황 대화"],["read","읽기"],["spk","말하기"],["rev","복습"],["card","표현 카드"]],ti;
     h+='<div class="sub">';
     for(ti=0;ti<tsubs.length;ti++)
       h+='<button data-on="'+(S.tSub===tsubs[ti][0]?1:0)+'" data-a="tsub" data-v="'+tsubs[ti][0]+'">'+tsubs[ti][1]+'</button>';
     h+='</div>';
-    h+=(S.tSub==="scene"?viewScene():(S.tSub==="read"?viewRead():viewTalk()));
+    h+=(S.tSub==="scene"?viewScene():(S.tSub==="read"?viewRead():(S.tSub==="spk"?viewSpk():(S.tSub==="rev"?viewRev():viewTalk()))));
   }
   else if(S.tab==="home"){h+=viewHome();}
   else{h+=viewGram2();}
@@ -7817,7 +8093,7 @@ document.addEventListener("click",function(ev){
       S.ybInput=r.text+" (음성 "+r.score+"점)";S.ybRes=r.res;S.ybCount++;if(r.res===2)S.ybScore++;
       S.total++;saveTotal();render();say(yq.ans);});
     return;}
-  if(a==="tsub"){S.tSub=v;S.scIdx=null;window.scrollTo(0,0);render();return;}
+  if(a==="tsub"){rdStop();S.tSub=v;S.scIdx=null;window.scrollTo(0,0);render();return;}
   if(a==="scopen"){S.scIdx=parseInt(v,10);S.scTurn=0;S.scPicked=null;S.scVoice=null;window.scrollTo(0,0);render();return;}
   if(a==="scclose"){S.scIdx=null;render();return;}
   if(a==="scpick"){
@@ -7871,11 +8147,20 @@ document.addEventListener("click",function(ev){
     if(gt==="gram"){S.gc=false;S.gGrp=null;}
     if(gt==="talk"&&gs){S.tSub=gs;S.rdIdx=null;}
     window.scrollTo(0,0);render();return;}
-  if(a==="rdopen"){rdStop();S.rdIdx=parseInt(v,10);S.rdKana=false;S.rdKo=false;window.scrollTo(0,0);render();return;}
+  if(a==="rdopen"){rdStop();S.rdIdx=parseInt(v,10);window.scrollTo(0,0);render();return;}
   if(a==="rdclose"){rdStop();S.rdIdx=null;window.scrollTo(0,0);render();return;}
   if(a==="rdall"){S.rdAll=!S.rdAll;render();return;}
-  if(a==="rdtoday"){S.tab="talk";S.tSub="read";S.rdIdx=rdTodayIdx();S.rdKana=false;S.rdKo=false;window.scrollTo(0,0);render();return;}
+  if(a==="rdtoday"){S.tab="talk";S.tSub="read";S.rdIdx=rdTodayIdx();window.scrollTo(0,0);render();return;}
   if(a==="rdkana"){S.rdKana=!S.rdKana;render();return;}
+  if(a==="spreset"){spStart();render();return;}
+  if(a==="sphint"){var sb0=document.getElementById("spbox");if(sb0)S.sp.input=sb0.value;S.sp.hint++;render();return;}
+  if(a==="spcheck"){var sb=document.getElementById("spbox");spCheck(sb?sb.value:"");return;}
+  if(a==="spgive"){var P0=S.sp,it0=P0.items[P0.i];P0.input="";P0.res={lv:"bad",gram:[],nat:[],note:"",gave:true};P0.done++;render();say(it0.jp,S.rdRate||0.8);return;}
+  if(a==="spretry"){S.sp.res=null;S.sp.input="";S.sp.done=Math.max(0,S.sp.done-1);render();return;}
+  if(a==="spnext"){S.sp.i++;S.sp.res=null;S.sp.input="";S.sp.hint=0;window.scrollTo(0,0);render();return;}
+  if(a==="spmic"){var it1=S.sp.items[S.sp.i];listen(function(alts){var bo=bestOf(alts,[it1.jp,it1.ka]);spCheck(bo.t||alts[0]||"");});return;}
+  if(a==="rvopen"){S.rvOpen=S.rvOpen||{};S.rvOpen[v]=true;render();return;}
+  if(a==="rvdone"){var dn=rvDone();if(dn[v])delete dn[v];else dn[v]=todayStr();LS.set("jp.rvdone",dn);render();return;}
   if(a==="rdsay"){rdSayLine(parseInt(v,10));return;}
   if(a==="rdplay"){
     if(S.rdPlaying){rdStop();render();return;}
@@ -8247,7 +8532,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/15-A (듣기 속도·끊김 개선)</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/16-A (회화·일기·Q&A · 말하기 · 복습)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
