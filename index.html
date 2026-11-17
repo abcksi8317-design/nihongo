@@ -2501,7 +2501,7 @@ var S={
   jQ:null, jPicked:null, jScore:0, jTotal:0, jSets:[],
   recOpen:null, radIdx:null, radQuiz:false, rqQ:null, rqPicked:null, rqScore:0, rqTotal:0,
   cAskPos:true, cPosPicked:null, cPosShow:false, cQMode:"ko", cShuffle:false, cHint:false,
-  cType:"all", cPer:0, cToday:true, cTodayIdx:0, cBlocks:["c_te","c_pl","c_po"], cWord:null, cTypeNow:"v", cSeq:null, cIdx:0,
+  chRep:LS.get("jp.chrep",1), cRep:LS.get("jp.crep",1), cRound:1, cFinished:false, cType:"all", cPer:0, cToday:true, cTodayIdx:0, cBlocks:["c_te","c_pl","c_po"], cWord:null, cTypeNow:"v", cSeq:null, cIdx:0,
   cRes:null, cInput:"", cScore:0, cTotal:0, cDone:0,
   gc:false, gcIdx:0, gGrp:null, gKo:true, ybGrp:null, ybCat:"masu", ybPol:{}, ybSec:0, ybQ:null, ybRes:null, ybInput:"", ybScore:0, ybCount:0,
   ybForms:["masu","te","ta","nai"], ybPForms:["desu","te","ta","nai"],
@@ -3981,17 +3981,17 @@ function dayBump(kind,n){
 }
 function chHits(){            /* 오늘 맞힌 총 횟수 (단어당 최대 3) */
   var w=chWords(),n=0;
-  for(var i=0;i<w.length;i++)n+=Math.min(3,S.ch.cnt[wkey(w[i])]||0);
+  for(var i=0;i<w.length;i++)n+=Math.min(S.chRep||1,S.ch.cnt[wkey(w[i])]||0);
   return n;
 }
-function chGoal(){return chWords().length*3;}
+function chGoal(){return chWords().length*(S.chRep||1);}
 function chRemaining(){
-  return chWords().filter(function(w){return (S.ch.cnt[wkey(w)]||0)<3;});
+  return chWords().filter(function(w){return (S.ch.cnt[wkey(w)]||0)<(S.chRep||1);});
 }
 function chMake(fixW,fixStage){
   var rem=chRemaining();
   if(!rem.length&&!fixW){S.chQ=null;return;}
-  var w=fixW||pick(rem),stage=(fixStage!==undefined&&fixStage!==null)?fixStage:(S.ch.cnt[wkey(w)]||0),pool=allWords();
+  var w=fixW||pick(rem),stage=(fixStage!==undefined&&fixStage!==null)?fixStage:((S.ch.cnt[wkey(w)]||0)%3),pool=allWords();
   var others=shuffle(pool.filter(function(x){return x.ko!==w.ko&&x.jp!==w.jp;})).slice(0,3);
   if(stage===0)
     S.chQ={w:w,stage:0,prompt:w.jp,sub:(w.jp!==w.kana?w.kana:""),ask:"뜻을 고르세요",
@@ -4012,7 +4012,7 @@ function chScore(ok){
   var k=wkey(S.chQ.w);
   if(ok){
     S.ch.cnt[k]=(S.ch.cnt[k]||0)+1;
-    if(S.ch.cnt[k]>=3&&!S.hist[k]){S.hist[k]=todayStr();saveHist();}
+    if(S.ch.cnt[k]>=(S.chRep||1)&&!S.hist[k]){S.hist[k]=todayStr();saveHist();}
     saveCh();
   }
 }
@@ -4033,12 +4033,15 @@ function viewChallenge(){
      '<div style="flex:1"><div class="stat" style="color:#7ED9A6">'+done+'</div><div class="v2" style="font-size:19px">외운 단어</div></div>'+
      '<div style="flex:1"><div class="stat" style="color:#F0C560">'+rem.length+'</div><div class="v2" style="font-size:19px">남은 단어</div></div></div>'+
      '<div class="bar" style="margin-top:12px"><i style="width:'+(goal?hits/goal*100:0)+'%;background:#2FA05E"></i></div>'+
-     '<div class="note" style="margin-top:5px">맞힌 횟수 '+hits+' / '+goal+' — 단어마다 3번씩 맞히면 외운 것으로 칩니다.</div></div>';
+     '<div class="note" style="margin-top:5px">맞힌 횟수 '+hits+' / '+goal+' — 단어마다 '+(S.chRep||1)+'번씩 맞히면 외운 것으로 칩니다.</div></div>';
   h+='<div class="chips" style="margin:0 0 2px">'+
      '<button class="chip sm" data-a="chpeek">'+(S.chPeek?"오늘 단어 접기":"오늘 단어 보기")+'</button>'+
      '<button class="chip sm" data-a="chreset">처음부터 다시</button>'+
      '<button class="chip sm" data-a="chnew">새 단어 10개로 바꾸기</button>'+
-     '<button class="chip sm" data-a="vsub" data-v="rec">기록 · 연속 '+streakDays()+'일</button></div>';
+     '<button class="chip sm" data-a="vsub" data-v="rec">기록 · 연속 '+streakDays()+'일</button>'+
+     '<span class="set" style="display:inline-flex;margin:0 0 0 4px"><span>단어마다 반복<select data-a="chrep">'+
+     [1,2,3,4,5].map(function(n){return '<option value="'+n+'"'+((S.chRep||1)===n?" selected":"")+'>'+n+'회</option>';}).join("")+
+     '</select></span></span></div>';
   if(S.chPeek){
     h+='<div class="card" style="margin:8px 0 12px"><table class="vocab">';
     for(i=0;i<words.length;i++){
@@ -4048,15 +4051,15 @@ function viewChallenge(){
          (pw.jp!==pw.kana?'<div class="v2">'+esc(pw.kana)+'</div>':"")+'</td>'+
          '<td class="v4">'+esc(pw.ko)+'</td>'+
          '<td style="width:74px" class="v2 mono">'+
-         (pc>=3?'<span style="color:#7ED9A6">완료</span>':'<span style="color:#F0C560">'+pc+'/3</span>')+
-         '<div class="dots">'+(function(){var dd="";for(var z=0;z<3;z++)dd+='<i'+(z<pc?' class="on"':'')+'></i>';return dd;})()+'</div></td>'+
+         (pc>=(S.chRep||1)?'<span style="color:#7ED9A6">완료</span>':'<span style="color:#F0C560">'+pc+'/'+(S.chRep||1)+'</span>')+
+         '<div class="dots">'+(function(){var dd="";for(var z=0;z<(S.chRep||1);z++)dd+='<i'+(z<pc?' class="on"':'')+'></i>';return dd;})()+'</div></td>'+
          '<td style="width:38px">'+pb(pw.jp,pw.kana)+'</td></tr>';
     }
-    h+='</table><p class="note">각 단어를 3번 맞히면 그날 날짜로 기록에 저장됩니다.</p></div>';
+    h+='</table><p class="note">각 단어를 '+(S.chRep||1)+'번 맞히면 그날 날짜로 기록에 저장됩니다.</p></div>';
   }
 
   if(!rem.length){
-    h+='<div class="empty"><b>오늘 10개 완료</b>각 단어를 세 번씩 맞혔습니다. 내일 새 10개가 열려요. 연속 '+streakDays()+'일째입니다.'+
+    h+='<div class="empty"><b>오늘 10개 완료</b>각 단어를 '+(S.chRep||1)+'번씩 맞혔습니다. 내일 새 10개가 열려요. 연속 '+streakDays()+'일째입니다.'+
        '<div class="row" style="margin-top:14px"><button class="btn" data-a="chreset">오늘 것 한 번 더</button>'+
        '<button class="btn" data-a="chnew">새 단어 10개</button>'+
        '<button class="btn main" data-a="vsub" data-v="rec">기록 보기</button></div></div>';
@@ -4074,7 +4077,7 @@ function viewChallenge(){
   if(!S.chQ)chMake();
   var q=S.chQ;
   h+='<div class="mono" style="font-size:16px;color:#8A9CBE;text-align:right;margin:6px 0">'+
-     (q.stage+1)+'단계 · 이 단어 '+(S.ch.cnt[wkey(q.w)]||0)+'/3</div>';
+     (q.stage+1)+'단계 · 이 단어 '+(S.ch.cnt[wkey(q.w)]||0)+'/'+(S.chRep||1)+'</div>';
   h+='<div class="card"><div class="qform" style="font-size:25px;color:#8A9CBE">'+esc(q.ask)+'</div>'+
      '<div style="text-align:center">'+
      (q.sub?'<div style="font-size:24px;color:var(--dim)">'+esc(q.sub)+'</div>':"")+
@@ -4867,7 +4870,15 @@ function viewChain(){
      '<button class="chip sm" data-on="'+(S.cToday?1:0)+'" data-a="ctoday" data-v="1">오늘 단어 '+tWs.length+'개</button>'+
      '<button class="chip sm" data-on="'+(S.cToday?0:1)+'" data-a="ctoday" data-v="0">전체에서 무작위</button></div>';
   if(S.cToday&&tWs.length){
+    h+='<div class="chips" style="margin:2px 0 6px"><span class="set" style="display:inline-flex;margin:0"><span>반복<select data-a="crep">'+
+       [1,2,3,4,5].map(function(n){return '<option value="'+n+'"'+((S.cRep||1)===n?" selected":"")+'>'+n+'회</option>';}).join("")+
+       '</select></span></span></div>';
+    if(S.cFinished){
+      return h+'<div class="empty"><b>오늘 변형 훈련 끝</b>오늘 단어 '+tWs.length+'개를 '+(S.cRep||1)+'회 연습했어요.'+
+        '<div class="row" style="margin-top:14px"><button class="btn main" data-a="cagain">한 번 더</button></div></div>';
+    }
     h+='<div class="pmini" style="margin:2px 0 10px">오늘 단어 '+(Math.min(S.cTodayIdx,tWs.length-1)+1)+' / '+tWs.length+
+       ((S.cRep||1)>1?' · '+S.cRound+'회차 / '+(S.cRep||1)+'회':'')+
        ' — 단어 외우기와 같은 목록 ('+esc(chThemeName(chTheme()))+')</div>';
   }else{
     h+='<div class="lab">단어 종류</div><div class="chips">';
@@ -8068,9 +8079,13 @@ document.addEventListener("click",function(ev){
   if(a==="cnext"){S.cIdx++;S.cRes=null;S.cInput="";S.cHint=false;
     if(S.cIdx>=S.cSeq.length)S.cDone++;
     window.scrollTo(0,0);render();return;}
-  if(a==="cnew"){ if(S.cToday){var tn2=chWords().length; if(tn2)S.cTodayIdx=(S.cTodayIdx+1)%tn2;}
+  if(a==="cnew"){ if(S.cToday){var tn2=chWords().length;
+      if(tn2){var nx=S.cTodayIdx+1;
+        if(nx>=tn2){ if(S.cRound<(S.cRep||1)){S.cRound++;S.cTodayIdx=0;} else {S.cFinished=true;window.scrollTo(0,0);render();return;} }
+        else S.cTodayIdx=nx;}}
     chBuild();S.cPosShow=false;S.cHint=false;window.scrollTo(0,0);render();return;}
-  if(a==="ctoday"){S.cToday=(v==="1");S.cTodayIdx=0;chBuild();S.cPosShow=false;S.cHint=false;window.scrollTo(0,0);render();return;}
+  if(a==="cagain"){S.cRound=1;S.cFinished=false;S.cTodayIdx=0;chBuild();window.scrollTo(0,0);render();return;}
+  if(a==="ctoday"){S.cToday=(v==="1");S.cTodayIdx=0;S.cRound=1;S.cFinished=false;chBuild();S.cPosShow=false;S.cHint=false;window.scrollTo(0,0);render();return;}
   if(a==="callsay"){say(S.cSeq.map(function(x){return x.ans;}).join("、"));return;}
   if(a==="cmic"){var cs=S.cSeq[S.cIdx];
     listen(function(alts){var r=judgeVoice(alts,[cs.ans,cs.ansK]);
@@ -8418,6 +8433,8 @@ document.addEventListener("click",function(ev){
 
 document.addEventListener("change",function(ev){
   var el=ev.target;
+  if(el.getAttribute&&el.getAttribute("data-a")==="chrep"){S.chRep=Math.max(1,Math.min(5,parseInt(el.value,10)||1));LS.set("jp.chrep",S.chRep);S.chQ=null;render();return;}
+  if(el.getAttribute&&el.getAttribute("data-a")==="crep"){S.cRep=Math.max(1,Math.min(5,parseInt(el.value,10)||1));LS.set("jp.crep",S.cRep);S.cRound=1;S.cFinished=false;render();return;}
   if(el.getAttribute&&el.getAttribute("data-a")==="rdrate"){S.rdRate=parseFloat(el.value)||0.8;LS.set("jp.rdrate",S.rdRate);return;}
   if(el.getAttribute&&el.getAttribute("data-a")==="rdlrep"){S.rdLRep=parseInt(el.value,10)||1;LS.set("jp.rdlrep",S.rdLRep);return;}
   if(el.getAttribute&&el.getAttribute("data-a")==="rdrep"){S.rdRep=parseInt(el.value,10)||1;LS.set("jp.rdrep",S.rdRep);return;}
@@ -8532,7 +8549,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/16-A (회화·일기·Q&A · 말하기 · 복습)</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/17-A (1·2번 반복 횟수)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
