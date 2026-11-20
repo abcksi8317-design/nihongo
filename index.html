@@ -313,6 +313,7 @@ body.fs2 .note,body.fs2 .why{font-size:22px;} body.fs3 .note,body.fs3 .why{font-
   font-weight:800;text-align:center;line-height:1.7;}
 .miss{border-left:3px solid var(--yel);padding:8px 0 8px 13px;font-size:23px;line-height:1.7;color:#E8DCB8;margin-top:12px;}
 table.vocab{width:100%;border-collapse:collapse;}
+table.vocab .v1,table.vocab .v2{white-space:nowrap;} table.vocab tr.relrow td{padding:0 4px 10px;border-bottom:1px solid rgba(255,255,255,.08);} table.vocab tr:has(+tr.relrow) td{border-bottom:none;} table.vocab tr.relrow .rel{margin-top:0;} table.vocab tr.relrow .relc{font-size:16px;padding:2px 9px;}
 table.vocab td{padding:9px 4px;border-bottom:1px solid rgba(255,255,255,.08);vertical-align:middle;}
 table.vocab .v1{font-size:31px;font-weight:800;} table.vocab .v2{font-size:22px;color:var(--dim);}
 table.vocab .v3{font-size:23px;color:#F0C560;text-align:right;white-space:nowrap;}
@@ -4290,11 +4291,11 @@ function viewChallenge(){
       h+='<tr><td style="width:30px" class="v2 mono">'+(i+1)+'</td>'+
          '<td><div class="v1" style="font-size:27px">'+esc(pw.jp)+'</div>'+
          (pw.jp!==pw.kana?'<div class="v2">'+esc(pw.kana)+'</div>':"")+'</td>'+
-         '<td class="v4">'+esc(pw.ko)+relChips(pw)+'</td>'+
+         '<td class="v4">'+esc(pw.ko)+'</td>'+
          '<td style="width:74px" class="v2 mono">'+
          (pc>=(S.chRep||1)?'<span style="color:#7ED9A6">완료</span>':'<span style="color:#F0C560">'+pc+'/'+(S.chRep||1)+'</span>')+
          '<div class="dots">'+(function(){var dd="";for(var z=0;z<(S.chRep||1);z++)dd+='<i'+(z<pc?' class="on"':'')+'></i>';return dd;})()+'</div></td>'+
-         '<td style="width:38px">'+pb(pw.jp,pw.kana)+'</td></tr>';
+         '<td style="width:38px">'+pb(pw.jp,pw.kana)+'</td></tr>'+(relChips(pw)?'<tr class="relrow"><td colspan="4">'+relChips(pw)+'</td></tr>':'');
     }
     h+='</table><p class="note">각 단어를 '+(S.chRep||1)+'번 맞히면 그날 날짜로 기록에 저장됩니다.</p></div>';
   }
@@ -4308,8 +4309,8 @@ function viewChallenge(){
     for(i=0;i<words.length;i++)
       h+='<tr><td><div class="v1" style="font-size:29px">'+esc(words[i].jp)+'</div>'+
          (words[i].jp!==words[i].kana?'<div class="v2">'+esc(words[i].kana)+'</div>':"")+'</td>'+
-         '<td class="v4">'+esc(words[i].ko)+relChips(words[i])+'</td><td style="width:38px">'+
-         '<button class="spk" data-a="say" data-v="'+esc(sayText(words[i].jp,words[i].kana))+'">▶</button></td></tr>';
+         '<td class="v4">'+esc(words[i].ko)+'</td><td style="width:38px">'+
+         '<button class="spk" data-a="say" data-v="'+esc(sayText(words[i].jp,words[i].kana))+'">▶</button></td></tr>'+(relChips(words[i])?'<tr class="relrow"><td colspan="3">'+relChips(words[i])+'</td></tr>':'');
     h+='</table></div>';
     return h;
   }
@@ -8978,7 +8979,8 @@ function syncMerge(n,lv,l,cv,c){
   return c>l?cv:lv;
 }
 function syncRun(allow){
-  if(!SYNC.db||!SYNC.user||SYNC.busy)return;
+  if(!SYNC.db||!SYNC.user)return;
+  if(SYNC.busy){SYNC.again=true;return;}   /* 진행 중이면 끝난 뒤 한 번 더 저장 */
   SYNC.busy=true;SYNC.msg="동기화 중…";syncRedraw();
   var ref=SYNC.db.collection("users").doc(SYNC.user.uid);
   ref.get().then(function(snap){
@@ -9008,7 +9010,7 @@ function syncRun(allow){
       }else{try{sessionStorage.setItem("jp.rl","0");}catch(e){}}
     });
   }).catch(function(e){SYNC.msg="동기화 오류: "+((e&&(e.code||e.message))||e);})
-    .then(function(){SYNC.busy=false;syncRedraw();});
+    .then(function(){SYNC.busy=false;syncRedraw();if(SYNC.again){SYNC.again=false;syncRun(false);}});
 }
 function syncPush(){
   if(!SYNC.user)return;
@@ -9035,7 +9037,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/19-B (읽기 한 줄 · 홈 정리)</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/20-B (저장 누락 방지)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
@@ -9092,6 +9094,7 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden){syncRun(false);}
   else if(Date.now()-(SYNC.last||0)>30000){syncRun(true);}
 });
+window.addEventListener("pagehide",function(){if(SYNC.user){SYNC.busy=false;syncRun(false);}});
 syncInit();
 
 render();
