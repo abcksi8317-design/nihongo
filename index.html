@@ -3980,7 +3980,7 @@ function viewRecord(){
       h+='</div>';
     }
   }
-  h+='<p class="note">날짜를 누르면 그날 외운 단어가 펼쳐집니다. 단어를 누르면 발음이 나와요.</p>';
+  h+='<p class="note">날짜를 누르면 그날 외운 단어와 읽은 글이 펼쳐집니다. 단어를 누르면 발음이 나와요.</p>';
   return h;
 }
 
@@ -7926,6 +7926,7 @@ function rdMarkRead(R){
 function rdReadDays(){
   var r=LS.get("jp.rdread",{}),o={},k,m;
   Object.keys(r).forEach(function(d){o[d]=1;});
+  try{var dl=LS.get("jp.dlog",{});Object.keys(dl).forEach(function(d){if(dl[d]&&dl[d].l&&dl[d].l.length)o[d]=1;});}catch(e){}   /* 그날 만들어진 글이 저장돼 있으면 그날의 글로 기록 */
   Object.keys(S.rdDone||{}).forEach(function(id){m=/^gen5-(\d{4}-\d{1,2}-\d{1,2})-/.exec(id);if(m)o[m[1]]=1;});
   return o;
 }
@@ -9061,7 +9062,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/26-A (기록에 읽은 글)</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/26-B (날짜별 글 기록)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
