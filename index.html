@@ -3916,17 +3916,22 @@ function streakDays(){
   return n;
 }
 function viewRecord(){
-  var h="",days=histByDay(),i,j;
+  var h="",days=histByDay(),i,j,rdd=rdReadDays(),dlg=LS.get("jp.dlog",{}),hv={};
+  days.forEach(function(d){hv[d.date]=1;});
+  Object.keys(rdd).forEach(function(d){if(!hv[d])days.push({date:d,words:[]});});
+  days.sort(function(a,b){return dkey(b.date)-dkey(a.date);});
   var total=0;days.forEach(function(d){total+=d.words.length;});
   var st=streakDays();
   h+='<div class="card" style="margin-bottom:12px"><div class="tag mono">학습 기록</div>'+
      '<div style="display:flex;gap:10px;margin-top:8px;text-align:center">'+
      '<div style="flex:1"><div style="font-size:40px;font-weight:900;line-height:1.1">'+total+'</div>'+
-       '<div class="v2" style="font-size:19px">외운 단어</div></div>'+
+       '<div class="v2" style="font-size:17px;white-space:nowrap">외운 단어</div></div>'+
+     '<div style="flex:1"><div style="font-size:40px;font-weight:900;line-height:1.1;color:#9CC4FF">'+Object.keys(rdd).length+'</div>'+
+       '<div class="v2" style="font-size:17px;white-space:nowrap">읽은 글</div></div>'+
      '<div style="flex:1"><div style="font-size:40px;font-weight:900;line-height:1.1;color:#7ED9A6">'+days.length+'</div>'+
-       '<div class="v2" style="font-size:19px">학습한 날</div></div>'+
+       '<div class="v2" style="font-size:17px;white-space:nowrap">학습한 날</div></div>'+
      '<div style="flex:1"><div style="font-size:40px;font-weight:900;line-height:1.1;color:#F0C560">'+st+'</div>'+
-       '<div class="v2" style="font-size:19px">연속 일수</div></div></div></div>';
+       '<div class="v2" style="font-size:17px;white-space:nowrap">연속 일수</div></div></div></div>';
 
   if(!days.length){
     h+='<div class="empty"><b>아직 기록이 없습니다</b>「오늘 10개」에서 단어를 세 번씩 맞히면 그날 날짜로 여기에 쌓입니다.'+
@@ -3940,8 +3945,8 @@ function viewRecord(){
   var probe=new Date();probe.setDate(probe.getDate()-27);
   for(i=0;i<28;i++){
     var kk2=probe.getFullYear()*10000+(probe.getMonth()+1)*100+probe.getDate();
-    var n=have[kk2]||0;
-    h+='<span class="cal'+(n?" on":"")+'" title="'+probe.getDate()+'일 '+n+'개">'+(n?n:"")+'</span>';
+    var n=have[kk2]||0,rk2=probe.getFullYear()+"-"+(probe.getMonth()+1)+"-"+probe.getDate(),isr=!!(rdd[rk2]||rdd[probe.getFullYear()+"-"+String(probe.getMonth()+1).padStart(2,"0")+"-"+String(probe.getDate()).padStart(2,"0")]);
+    h+='<span class="cal'+((n||isr)?" on":"")+'" title="'+probe.getDate()+'일 '+n+'개">'+(n?n:(isr?"읽":""))+'</span>';
     probe.setDate(probe.getDate()+1);
   }
   h+='</div><div class="note" style="margin:6px 0 14px">칸 안의 숫자가 그날 외운 단어 수입니다.</div>';
@@ -3950,7 +3955,7 @@ function viewRecord(){
     var dd=days[i],open=(S.recOpen===dd.date),ago=dDiff(dd.date);
     h+='<button class="chap" data-a="recopen" data-v="'+esc(dd.date)+'">'+
        '<span class="no2 mono">'+dLabel(dd.date)+'</span>'+
-       '<span class="tt">'+dWeekday(dd.date)+' · '+dd.words.length+'단어</span>'+
+       '<span class="tt">'+dWeekday(dd.date)+' · '+dd.words.length+'단어'+(rdd[dd.date]?' · 읽기 ✓':'')+'</span>'+
        '<span class="st '+(ago===0?"c":"d")+'">'+(ago===0?"오늘":(ago===1?"어제":ago+"일 전"))+'</span></button>';
     if(open){
       h+='<div class="wlist">';
@@ -3960,7 +3965,16 @@ function viewRecord(){
            (w.jp!==w.kana?'<span style="color:#5E739C;font-size:20.5px;display:block">'+esc(w.kana)+'</span>':"")+
            esc(w.jp)+'</b><s>'+esc(w.ko)+'</s></div>';
       }
-      h+='<div class="row" style="margin-top:10px">'+
+      if(rdd[dd.date]){
+        var le=dlg[dd.date];
+        h+='<div class="sec mono" style="margin:14px 0 6px">그날 읽은 글'+(le&&le.t?' · '+esc(le.t):'')+'</div>';
+        if(le&&le.l){
+          for(j=0;j<le.l.length;j++){var ln=le.l[j];
+            h+='<div class="rdline"><div class="rj" data-a="say" data-v="'+esc(sayText(ln[0],ln[1]).replace(/^(田中|私)[：:]/,""))+'">'+esc(ln[0])+'</div>'+
+               (ln[1]&&ln[1]!==ln[0]?'<div class="rk">'+esc(ln[1])+'</div>':"")+'<div class="rm" style="font-size:20px">'+esc(ln[2])+'</div></div>';}
+        }else h+='<div class="note">이 날의 글 내용은 저장되어 있지 않습니다(읽은 기록만 남아 있어요).</div>';
+      }
+      if(dd.words.length)h+='<div class="row" style="margin-top:10px">'+
          '<button class="btn sm" data-a="recquiz" data-v="'+esc(dd.date)+'">이 날짜만 다시 테스트</button>'+
          '<button class="btn sm" data-a="recback" data-v="'+esc(dd.date)+'">오늘 목록에 다시 넣기</button></div>';
       h+='</div>';
@@ -4272,7 +4286,7 @@ function viewChallenge(){
   h+='</div><p class="note" style="margin:0 0 12px">'+esc(thD)+' · 테마는 날짜에 따라 저절로 바뀌고, 여기서 직접 고를 수도 있습니다.</p>';
   h+='<div class="card" style="margin-bottom:12px"><div style="display:flex;gap:10px;text-align:center">'+
      '<div style="flex:1"><div class="stat">'+words.length+'</div><div class="v2" style="font-size:19px">외울 단어</div></div>'+
-     '<div style="flex:1"><div class="stat" style="color:#7ED9A6">'+done+'</div><div class="v2" style="font-size:19px">외운 단어</div></div>'+
+     '<div style="flex:1"><div class="stat" style="color:#7ED9A6">'+done+'</div><div class="v2" style="font-size:17px;white-space:nowrap">외운 단어</div></div>'+
      '<div style="flex:1"><div class="stat" style="color:#F0C560">'+rem.length+'</div><div class="v2" style="font-size:19px">남은 단어</div></div></div>'+
      '<div class="bar" style="margin-top:12px"><i style="width:'+(goal?hits/goal*100:0)+'%;background:#2FA05E"></i></div>'+
      '<div class="note" style="margin-top:5px">맞힌 횟수 '+hits+' / '+goal+' — 단어마다 '+(S.chRep||1)+'번씩 맞히면 외운 것으로 칩니다.</div></div>';
@@ -7905,13 +7919,23 @@ function rdGenToday(){
 /* ===== 날짜별 학습 기록 (복습용) ===== */
 function dayStrOff(off){var d=dParse(todayStr());d.setDate(d.getDate()+off);
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function rdMarkRead(R){
+  if(!R||!R.gen)return;
+  try{var r=LS.get("jp.rdread",{}),t=todayStr();if(!r[t]){r[t]=1;LS.set("jp.rdread",r);}}catch(e){}
+}
+function rdReadDays(){
+  var r=LS.get("jp.rdread",{}),o={},k,m;
+  Object.keys(r).forEach(function(d){o[d]=1;});
+  Object.keys(S.rdDone||{}).forEach(function(id){m=/^gen5-(\d{4}-\d{1,2}-\d{1,2})-/.exec(id);if(m)o[m[1]]=1;});
+  return o;
+}
 function rdLogSave(R){
   var log=LS.get("jp.dlog",{}),t=todayStr();
   if(log[t]&&log[t].id===R.id)return;
-  log[t]={id:R.id,w:R.words.map(function(w){return [w[0],w[1],w[2]];}),
+  log[t]={id:R.id,t:R.t||"",w:R.words.map(function(w){return [w[0],w[1],w[2]];}),
           l:R.lines.map(function(l){return [l[0],l[1],l[2],l[4]||"",l[5]||""];})};
   var ks=Object.keys(log).sort();
-  while(ks.length>40){delete log[ks.shift()];}
+  while(ks.length>90){delete log[ks.shift()];}
   LS.set("jp.dlog",log);
 }
 function rdSync(){
@@ -8310,9 +8334,9 @@ function viewHome(){
   /* 현황 */
   h+='<div class="card" style="margin-bottom:12px"><div class="tag mono">지금까지</div>'+
      '<div style="display:flex;gap:10px;margin-top:8px;text-align:center">'+
-     '<div style="flex:1"><div class="stat">'+total+'</div><div class="v2" style="font-size:19px">외운 단어</div></div>'+
-     '<div style="flex:1"><div class="stat" style="color:#7ED9A6">'+days.length+'</div><div class="v2" style="font-size:19px">학습한 날</div></div>'+
-     '<div style="flex:1"><div class="stat" style="color:#F0C560">'+st+'</div><div class="v2" style="font-size:19px">연속 일수</div></div></div>'+
+     '<div style="flex:1"><div class="stat">'+total+'</div><div class="v2" style="font-size:17px;white-space:nowrap">외운 단어</div></div>'+
+     '<div style="flex:1"><div class="stat" style="color:#7ED9A6">'+days.length+'</div><div class="v2" style="font-size:17px;white-space:nowrap">학습한 날</div></div>'+
+     '<div style="flex:1"><div class="stat" style="color:#F0C560">'+st+'</div><div class="v2" style="font-size:17px;white-space:nowrap">연속 일수</div></div></div>'+
      '<div class="bar" style="margin-top:12px"><i style="width:'+Math.min(100,Math.round(total/allN*100))+'%;background:#2FA05E"></i></div>'+
      '<div class="note" style="margin-top:5px">전체 단어 '+allN+'개 중 '+Math.round(total/allN*100)+'% 외웠습니다.</div>'+
      '<div class="row" style="margin-top:10px"><button class="btn sm" data-a="goto" data-v="vocab:rec">날짜별 기록 보기</button></div></div>';
@@ -8641,7 +8665,7 @@ document.addEventListener("click",function(ev){
     if(gt==="gram"){S.gc=false;S.gGrp=null;}
     if(gt==="talk"&&gs){S.tSub=gs;S.rdIdx=null;}
     window.scrollTo(0,0);render();return;}
-  if(a==="rdopen"){rdStop();S.rdIdx=parseInt(v,10);window.scrollTo(0,0);render();return;}
+  if(a==="rdopen"){rdStop();S.rdIdx=parseInt(v,10);rdMarkRead(READS[S.rdIdx]);window.scrollTo(0,0);render();return;}
   if(a==="rdclose"){rdStop();S.rdIdx=null;window.scrollTo(0,0);render();return;}
   if(a==="rdall"){S.rdAll=!S.rdAll;render();return;}
   if(a==="rdtoday"){S.tab="talk";S.tSub="read";S.rdIdx=rdTodayIdx();window.scrollTo(0,0);render();return;}
@@ -8672,7 +8696,7 @@ document.addEventListener("click",function(ev){
     var R3=READS[S.rdIdx],g3=0;
     for(var z3=0;z3<R3.quiz.length;z3++)if(S.rdAns[R3.id+"-"+z3]===R3.quiz[z3].a)g3++;
     S.rdDone[R3.id]=g3;LS.set("jp.rd",S.rdDone);render();return;}
-  if(a==="rdans"){dayBump("read");
+  if(a==="rdans"){dayBump("read");rdMarkRead(READS[S.rdIdx]);
     var rp=v.split("|"),rk=rp[0],ri=parseInt(rp[1],10);
     if(S.rdAns[rk]!==undefined)return;
     S.rdAns[rk]=ri;
@@ -8966,7 +8990,7 @@ function syncMerge(n,lv,l,cv,c){
     if(al&&ac&&al!==ac)return al<ac?lv:cv;
     return (c>=l)?cv:lv;
   }
-  if((n==="hist"||n==="seen"||n==="rd"||n==="srs"||n==="course")&&isO(lv)&&isO(cv)){
+  if((n==="hist"||n==="seen"||n==="rd"||n==="srs"||n==="course"||n==="dlog"||n==="rdread")&&isO(lv)&&isO(cv)){
     var o={},first=(c>l)?lv:cv,second=(c>l)?cv:lv;
     Object.keys(first).forEach(function(k){o[k]=first[k];});
     Object.keys(second).forEach(function(k){o[k]=second[k];});
@@ -9037,7 +9061,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/20-B (저장 누락 방지)</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/26-A (기록에 읽은 글)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
