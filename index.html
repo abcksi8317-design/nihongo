@@ -313,7 +313,7 @@ body.fs2 .note,body.fs2 .why{font-size:22px;} body.fs3 .note,body.fs3 .why{font-
   font-weight:800;text-align:center;line-height:1.7;}
 .miss{border-left:3px solid var(--yel);padding:8px 0 8px 13px;font-size:23px;line-height:1.7;color:#E8DCB8;margin-top:12px;}
 table.vocab{width:100%;border-collapse:collapse;}
-table.vocab .v1,table.vocab .v2{white-space:nowrap;} table.vocab tr.relrow td{padding:0 4px 10px;border-bottom:1px solid rgba(255,255,255,.08);} table.vocab tr:has(+tr.relrow) td{border-bottom:none;} table.vocab tr.relrow .rel{margin-top:0;} table.vocab tr.relrow .relc{font-size:16px;padding:2px 9px;}
+table.vocab .v1,table.vocab .v2,table.vocab .v4{white-space:nowrap;} table.vocab td.v4{font-size:22px;} table.vocab tr.relrow td{padding:0 4px 10px;border-bottom:1px solid rgba(255,255,255,.08);} table.vocab tr:has(+tr.relrow) td{border-bottom:none;} table.vocab tr.relrow .rel{margin-top:0;} table.vocab tr.relrow .relc{font-size:16px;padding:2px 9px;}
 table.vocab td{padding:9px 4px;border-bottom:1px solid rgba(255,255,255,.08);vertical-align:middle;}
 table.vocab .v1{font-size:31px;font-weight:800;} table.vocab .v2{font-size:22px;color:var(--dim);}
 table.vocab .v3{font-size:23px;color:#F0C560;text-align:right;white-space:nowrap;}
@@ -4046,8 +4046,9 @@ function relOf(w){
   return out;
 }
 function relChips(w){
-  var r=relOf(w),lab={opp:"반대말",pair:"짝 동사",rel:"함께 쓰는 말"},h="",i;
+  var r=relOf(w).filter(function(x){return x.t==="opp";}),lab={opp:"반대말"},h="",i;
   if(!r.length)return "";
+  r=r.slice(0,1);
   h='<div class="rel">';
   for(i=0;i<r.length;i++){
     var x=r[i].w;
@@ -4155,10 +4156,14 @@ function chExcluded(avoid){
   for(k in S.hist)ex[k]=1;
   if(S.seen)for(k in S.seen)ex[k]=1;
   (avoid||[]).forEach(function(x){ex[x]=1;});
+  try{var dl=LS.get("jp.dlog",{});          /* 기록이 일부 사라져도, 날짜별 글에 쓰인 단어는 다시 뽑지 않습니다 */
+    Object.keys(dl).forEach(function(d){((dl[d]&&dl[d].w)||[]).forEach(function(w){if(w&&w[0])ex[w[0]+"|"+w[1]]=1;});});}catch(e){}
   return ex;
 }
 function chBuildSet(ex){
-  var all=allWords().filter(function(w){return wPos(w)!=="adv";}),i,out=[],used={};
+  /* 날짜·요일·경어처럼 따로 배우는 말은 빼고, 생활·N5~N3 단어를 먼저 뽑습니다 */
+  var all=allWords().filter(function(w){return wPos(w)!=="adv"&&!/날짜|요일|경어/.test(w.tag||"");}),i,out=[],used={};
+  function isCore(w){var t=w.tag||"";return !t||/^생활|^형용사|^動詞|단어$/.test(t);}
   var rng=rdRng(rdHash(todayStr()+"|"+(S.chSalt||"")+"|set"));
   function ok(w){var k=wkey(w);return !ex[k]&&!used[k];}
   function take(w){used[wkey(w)]=1;out.push(w);}
@@ -4171,6 +4176,7 @@ function chBuildSet(ex){
     var a=JPMAP[r[0]],b=JPMAP[r[1]];
     if(!a||!b||a===b)return;
     if(wPos(a)==="adv"||wPos(b)==="adv")return;
+    if(/날짜|요일|경어/.test((a.tag||"")+(b.tag||"")))return;
     if(!ok(a)||!ok(b))return;
     prs.push({a:a,b:b,t:r[2],g:grp(a)});
   });
@@ -4187,7 +4193,8 @@ function chBuildSet(ex){
   var want={v:3,i:2,na:2,n:3};
   out.forEach(function(w){var p=wPos(w);if(want[p]>0)want[p]--;});
   function singles(pos,n){
-    var a=rdShuf(all.filter(function(w){return (!pos||wPos(w)===pos)&&ok(w);}),rng);
+    var c=all.filter(function(w){return (!pos||wPos(w)===pos)&&ok(w);});
+    var a=rdShuf(c.filter(isCore),rng).concat(rdShuf(c.filter(function(w){return !isCore(w);}),rng));
     a.slice(0,n).forEach(take);
   }
   ["v","i","na","n"].forEach(function(p){if(want[p]>0&&out.length<10)singles(p,Math.min(want[p],10-out.length));});
@@ -5698,6 +5705,8 @@ var NEWW=[
 ];
 
 /* 여행·생활 어휘를 수업 단어와 같은 풀에 넣습니다 */
+/* N4·N3 생활 단어 (오늘 10개 후보) — 이미 있는 단어는 allWords 가 자동으로 한 번만 씁니다 */
+NEWW.push(["N4·N3 동사",[["働く","はたらく","일하다"],["休む","やすむ","쉬다"],["泊まる","とまる","묵다"],["乗る","のる","타다"],["降りる","おりる","내리다"],["乗り換える","のりかえる","갈아타다"],["着く","つく","도착하다"],["送る","おくる","보내다"],["渡す","わたす","건네주다"],["預ける","あずける","맡기다"],["払う","はらう","지불하다"],["貯める","ためる","모으다"],["捨てる","すてる","버리다"],["拾う","ひろう","줍다"],["落とす","おとす","떨어뜨리다"],["壊れる","こわれる","고장 나다"],["直す","なおす","고치다"],["干す","ほす","말리다"],["畳む","たたむ","개다"],["磨く","みがく","닦다"],["切る","きる","자르다"],["焼く","やく","굽다"],["茹でる","ゆでる","삶다"],["炒める","いためる","볶다"],["混ぜる","まぜる","섞다"],["温める","あたためる","데우다"],["冷やす","ひやす","식히다"],["迷う","まよう","헤매다"],["間に合う","まにあう","시간에 맞추다"],["慣れる","なれる","익숙해지다"],["続ける","つづける","계속하다"],["決める","きめる","정하다"],["変える","かえる","바꾸다"],["変わる","かわる","바뀌다"],["増やす","ふやす","늘리다"],["減る","へる","줄다"],["足りる","たりる","충분하다"],["余る","あまる","남다"],["困る","こまる","곤란하다"],["心配する","しんぱいする","걱정하다"],["安心する","あんしんする","안심하다"],["我慢する","がまんする","참다"],["断る","ことわる","거절하다"],["招待する","しょうたいする","초대하다"],["約束する","やくそくする","약속하다"],["謝る","あやまる","사과하다"],["褒める","ほめる","칭찬하다"],["叱る","しかる","혼내다"],["笑う","わらう","웃다"],["泣く","なく","울다"],["驚く","おどろく","놀라다"],["喜ぶ","よろこぶ","기뻐하다"],["考える","かんがえる","생각하다"],["思い出す","おもいだす","떠올리다"],["忘れる","わすれる","잊다"],["気づく","きづく","알아차리다"],["見つかる","みつかる","발견되다"],["見つける","みつける","찾아내다"],["伝える","つたえる","전하다"],["答える","こたえる","대답하다"],["尋ねる","たずねる","묻다"],["知らせる","しらせる","알리다"],["育てる","そだてる","키우다"],["似る","にる","닮다"],["太る","ふとる","살찌다"],["痩せる","やせる","살이 빠지다"],["治る","なおる","낫다"],["通う","かよう","다니다"],["勝つ","かつ","이기다"],["負ける","まける","지다"]]],["N4·N3 형용사",[["眠い","ねむい","졸리다"],["痛い","いたい","아프다"],["苦い","にがい","쓰다"],["甘い","あまい","달다"],["酸っぱい","すっぱい","시다"],["濃い","こい","진하다"],["薄い","うすい","얇다"],["厚い","あつい","두껍다"],["重い","おもい","무겁다"],["軽い","かるい","가볍다"],["深い","ふかい","깊다"],["狭い","せまい","좁다"],["広い","ひろい","넓다"],["細い","ほそい","가늘다"],["太い","ふとい","굵다"],["汚い","きたない","더럽다"],["眩しい","まぶしい","눈부시다"],["暗い","くらい","어둡다"],["明るい","あかるい","밝다"],["優しい","やさしい","상냥하다"],["厳しい","きびしい","엄하다"],["正しい","ただしい","옳다"],["珍しい","めずらしい","드물다"],["欲しい","ほしい","갖고 싶다"],["懐かしい","なつかしい","그립다"],["うるさい","うるさい","시끄럽다"],["賢い","かしこい","똑똑하다"],["元気","げんき","건강하다"],["丈夫","じょうぶ","튼튼하다"],["十分","じゅうぶん","충분하다"],["無理","むり","무리다"],["自由","じゆう","자유롭다"],["簡単","かんたん","간단하다"],["複雑","ふくざつ","복잡하다"],["安全","あんぜん","안전하다"],["不安","ふあん","불안하다"],["不便","ふべん","불편하다"],["特別","とくべつ","특별하다"],["普通","ふつう","보통이다"],["真面目","まじめ","성실하다"],["退屈","たいくつ","지루하다"],["素敵","すてき","멋지다"],["必要","ひつよう","필요하다"]]],["N4·N3 생활 명사",[["財布","さいふ","지갑"],["領収書","りょうしゅうしょ","영수증"],["袋","ふくろ","봉투"],["電池","でんち","건전지"],["充電","じゅうでん","충전"],["画面","がめん","화면"],["予定","よてい","일정"],["準備","じゅんび","준비"],["習慣","しゅうかん","습관"],["趣味","しゅみ","취미"],["経験","けいけん","경험"],["理由","りゆう","이유"],["意見","いけん","의견"],["気持ち","きもち","기분"],["性格","せいかく","성격"],["目標","もくひょう","목표"],["結果","けっか","결과"],["問題","もんだい","문제"],["場合","ばあい","경우"],["方法","ほうほう","방법"],["情報","じょうほう","정보"],["景色","けしき","경치"],["空気","くうき","공기"],["温度","おんど","온도"],["近所","きんじょ","근처"],["交差点","こうさてん","교차로"],["横断歩道","おうだんほどう","횡단보도"],["駐車場","ちゅうしゃじょう","주차장"],["郵便局","ゆうびんきょく","우체국"],["市役所","しやくしょ","시청"],["薬局","やっきょく","약국"],["美容院","びよういん","미용실"],["洗面所","せんめんじょ","세면실"],["台所","だいどころ","부엌"],["冷蔵庫","れいぞうこ","냉장고"],["電子レンジ","でんしレンジ","전자레인지"],["洗濯機","せんたくき","세탁기"],["掃除機","そうじき","청소기"],["布団","ふとん","이불"],["枕","まくら","베개"],["歯医者","はいしゃ","치과"],["風邪","かぜ","감기"],["熱","ねつ","열"],["咳","せき","기침"],["怪我","けが","부상"],["睡眠","すいみん","수면"],["食欲","しょくよく","식욕"],["材料","ざいりょう","재료"],["調味料","ちょうみりょう","조미료"],["味噌","みそ","된장"],["醤油","しょうゆ","간장"],["砂糖","さとう","설탕"],["塩","しお","소금"],["卵","たまご","달걀"],["残業","ざんぎょう","야근"],["会議","かいぎ","회의"],["給料","きゅうりょう","월급"],["休憩","きゅうけい","휴식"],["締め切り","しめきり","마감"],["同僚","どうりょう","동료"],["上司","じょうし","상사"]]]);
 NEWW.forEach(function(g){g[1].forEach(function(w){CLASSRAW.push([w[0],w[1],w[2],"생활 · "+g[0]]);});});
 var CLASSW=CLASSRAW.map(function(x){return {jp:x[0],kana:x[1],ko:x[2],en:"",tag:x[3]};});
 /* 연습에만 있던 형용사를 단어장에도 넣습니다 — 형용사 테마로 외울 수 있게 */
@@ -9062,7 +9071,7 @@ function syncInit(){
   });
 }
 function syncCard(){
-  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/26-B (날짜별 글 기록)</div>';
+  var h='<div class="card" style="margin-top:14px"><div class="tag mono">기기 연동 · 백업 · 버전 11/26-C (단어 선정 개선)</div>';
   if(!FB_CONFIG){
     h+='<div class="body">자동 연동은 <b>아직 꺼져 있습니다</b>. 설정을 마치면 폰·PC·태블릿이 같은 기록을 씁니다.</div>';
   }else if(!SYNC.user){
